@@ -5,6 +5,7 @@ from pymilvus import AnnSearchRequest
 from pymilvus import RRFRanker
 import torch
 from reranker import text_rerank
+import json
 
 client = MilvusClient(uri="http://127.0.0.1:19530")
 
@@ -169,14 +170,21 @@ class MilvusColbertRetriever:
         else:
             return scores
 
-    def Img_search(self, data,customNames, topk):
+    def Img_search(self, data,customNames, topk,doc=[]):
         # Perform a vector search on the collection to find the top-k most similar documents.
         # data是一个向量组，这里在进行批量检索
-        search_params = {
-            "metric_type": "IP", 
-            "params": {},
-            "expr": f"customName in {customNames}",
-            }
+        if(doc != []):
+            search_params = {
+                "metric_type": "IP", 
+                "params": {},
+                "expr": f"customName in {customNames} and doc in {doc}",
+                }
+        else:
+            search_params = {
+                "metric_type": "IP", 
+                "params": {},
+                "expr": f"customName in {customNames}",
+                }
         results = self.client.search(
             self.collection_name,
             data,
@@ -247,6 +255,18 @@ class MilvusColbertRetriever:
     def Muti_hybrid_search(self,query_param, topk, rerank_topn=50, weights=(0.4, 0.3, 0.3)):
         # text semantic search (dense)
         customNames = query_param["customNames"]
+        
+        count = self.count_entity_customNames(customNames)
+        if(count >= rerank_topn*2):
+            rerank_topn = rerank_topn
+        elif(count < rerank_topn*2 and count > topk*2):
+            rerank_topn = count//2
+        elif(count < topk*2 and count >= topk):
+            rerank_topn = topk
+        else:
+            topk = count
+            rerank_topn =count
+            
         search_param_1 = {
             "data": [query_param["text_dense_vector"]],
             "anns_field": "text_dense",
@@ -303,9 +323,9 @@ class MilvusColbertRetriever:
        #每页图的存储位置一定是一个唯一值，根据存储位置匹配数据库中的每一页的caption文本
         doc_texts = client.query(
                 collection_name=self.collection_name,
-                filter=f"doc in {docs_res}",
+                filter=f"doc in {docs_res} and customName in {customNames}",
                 output_fields=["text","doc"],
-                limit=1000,
+                limit=len(docs_res),
             )    
         
         #构建model-rerank的请求，documents的索引顺序就是doc_texts里的顺序
@@ -319,9 +339,214 @@ class MilvusColbertRetriever:
         for res_item in res["output"]["results"]:
             search_output.append(doc_texts[res_item["index"]]["doc"])
         
+        if(len(search_output) != topk or len(search_output) != count):
+            print(f"向量查询出现问题，不足topk:\n{search_output}")
+        return search_output
+    
+    def Muti_hybrid_search_intersection(self,query_param, topk, rerank_topn=50, weights=(0.4, 0.3, 0.3)):
+        # text semantic search (dense)
+        customNames = query_param["customNames"]
+        
+        count = self.count_entity_customNames(customNames)
+        if(count >= rerank_topn*2):
+            rerank_topn = rerank_topn
+        elif(count < rerank_topn*2 and count > topk*2):
+            rerank_topn = count//2
+        elif(count < topk*2 and count >= topk):
+            rerank_topn = topk
+        else:
+            topk = count
+            rerank_topn =count
+            
+        search_param_1 = {
+            "data": [query_param["text_dense_vector"]],
+            "anns_field": "text_dense",
+            "param": {"nprobe": 10},
+            "expr": f"seq_id == 0 and customName in {customNames}",
+            "limit": rerank_topn
+        }
+        request_1 = AnnSearchRequest(**search_param_1)
+        
+        # full-text search (sparse)
+        search_param_2 = {
+            "data": [query_param["text_query"]],
+            "anns_field": "text_sparse",
+            "param": {"drop_ratio_search": 0.2},
+            "expr": f"seq_id == 0 and customName in {customNames}",
+            "limit": rerank_topn
+        }
+        request_2 = AnnSearchRequest(**search_param_2)
+        
+        if(topk*2 > count):
+            request_3 = self.Img_search(query_param["image_query"],customNames,count)
+        else:
+            request_3 = self.Img_search(query_param["image_query"],customNames,topk*2)
+
+        #先混合文本检索
+        RRFranker = RRFRanker(100)
+        reqs = [request_1,request_2]
+        res = client.hybrid_search(
+            collection_name=self.collection_name,
+            reqs=reqs,
+            ranker=RRFranker,
+            limit=topk*2,
+            output_fields=["doc"]
+        )
+        
+        docs_t=[]
+        for resItem in res:
+            for item in resItem:
+                docs_t.append(item["doc"])
+        
+        docs_Img = []
+        for sitem in request_3:
+            docs_Img.append(sitem[2])
+        
+        #将图片特征点匹配结果与前面已混合的文本检索,提取每页图片的存储位置做交集，存入docs_res 
+        set_t = set(docs_t)
+        set_Img = set(docs_Img)    
+        docs_res = list(set_t & set_Img)
+       
+       
+       #每页图的存储位置一定是一个唯一值，根据存储位置匹配数据库中的每一页的caption文本
+        doc_texts = client.query(
+                collection_name=self.collection_name,
+                filter=f"doc in {docs_res} and customName in {customNames}",
+                output_fields=["text","doc"],
+                limit=len(docs_res),
+            )    
+        
+        #构建model-rerank的请求，documents的索引顺序就是doc_texts里的顺序
+        documents=[]
+        for item in doc_texts:
+            documents.append(item["text"])
+        res = text_rerank(documents,query_param["text_query"],topk)
+        
+        #获取响应中的重排的索引顺序，匹配对应索引顺序的图片存储位置并返回
+        search_output = []
+        for res_item in res["output"]["results"]:
+            search_output.append(doc_texts[res_item["index"]]["doc"])
+        
+        
+        if(len(search_output) != topk or len(search_output) != count):
+            print(f"向量查询出现问题，不足topk:\n{search_output}")
+        return search_output
+    
+    
+    def Muti_hybrid_search_img_in_text(self,query_param, topk, rerank_topn=50, weights=(0.4, 0.3, 0.3)):
+        # text semantic search (dense)
+        customNames = query_param["customNames"]
+        
+        count = self.count_entity_customNames(customNames)
+        if(count >= rerank_topn*2):
+            rerank_topn = rerank_topn
+        elif(count < rerank_topn*2 and count > topk*2):
+            rerank_topn = count//2
+        elif(count < topk*2 and count >= topk):
+            rerank_topn = topk
+        else:
+            topk = count
+            rerank_topn =count
+            
+        search_param_1 = {
+            "data": [query_param["text_dense_vector"]],
+            "anns_field": "text_dense",
+            "param": {"nprobe": 10},
+            "expr": f"seq_id == 0 and customName in {customNames}",
+            "limit": rerank_topn
+        }
+        request_1 = AnnSearchRequest(**search_param_1)
+        
+        # full-text search (sparse)
+        search_param_2 = {
+            "data": [query_param["text_query"]],
+            "anns_field": "text_sparse",
+            "param": {"drop_ratio_search": 0.2},
+            "expr": f"seq_id == 0 and customName in {customNames}",
+            "limit": rerank_topn
+        }
+        request_2 = AnnSearchRequest(**search_param_2)
+
+        #先混合文本检索
+        RRFranker = RRFRanker(100)
+        reqs = [request_1,request_2]
+        res = client.hybrid_search(
+            collection_name=self.collection_name,
+            reqs=reqs,
+            ranker=RRFranker,
+            limit=rerank_topn,
+            output_fields=["doc"]
+        )
+        
+        doc=[]
+        for resItem in res:
+            for item in resItem:
+                doc.append(item["doc"])
+        
+        request_3 = self.Img_search(query_param["image_query"],customNames,topk,doc)
+        
+        search_output = []
+        for sitem in request_3:
+            search_output.append(sitem[2])
+        
         return search_output
         
+    def Muti_hybrid_search_text_in_img(self,query_param, topk, rerank_topn=50, weights=(0.4, 0.3, 0.3)):
+        customNames = query_param["customNames"]
         
+        count = self.count_entity_customNames(customNames)
+        if(count >= rerank_topn*2):
+            rerank_topn = rerank_topn
+        elif(count < rerank_topn*2 and count > topk*2):
+            rerank_topn = count//2
+        elif(count < topk*2 and count >= topk):
+            rerank_topn = topk
+        else:
+            topk = count
+            rerank_topn =count
+            
+        request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn)
+        doc = []
+        for sitem in request_3:
+            doc.append(sitem[2])
+        
+        # text semantic search (dense)
+        search_param_1 = {
+            "data": [query_param["text_dense_vector"]],
+            "anns_field": "text_dense",
+            "param": {"nprobe": 10},
+            "expr": f"seq_id == 0 and customName in {customNames} and doc in {doc}",
+            "limit": rerank_topn//2
+        }
+        request_1 = AnnSearchRequest(**search_param_1)
+        
+        # full-text search (sparse)
+        search_param_2 = {
+            "data": [query_param["text_query"]],
+            "anns_field": "text_sparse",
+            "param": {"drop_ratio_search": 0.2},
+            "expr": f"seq_id == 0 and customName in {customNames} and doc in {doc}",
+            "limit": rerank_topn//2
+        }
+        request_2 = AnnSearchRequest(**search_param_2)
+        
+        #混合文本检索
+        RRFranker = RRFRanker(100)
+        reqs = [request_1,request_2]
+        res = client.hybrid_search(
+            collection_name=self.collection_name,
+            reqs=reqs,
+            ranker=RRFranker,
+            limit=topk,
+            output_fields=["doc"]
+        )
+        
+        search_output=[]
+        for resItem in res:
+            for item in resItem:
+                search_output.append(item["doc"])
+                     
+        return search_output   
 
     def insert(self, data):
         # Insert ColBERT embeddings and metadata for a document into the collection.
@@ -370,3 +595,12 @@ class MilvusColbertRetriever:
             output_fields=["count(*)"]
         )
         return res
+    
+    def count_entity_customNames(self,customNames):
+        res = client.query(
+            collection_name=self.collection_name,
+            filter=f"seq_id == 0 and customName in {customNames}",
+            output_fields=["count(*)"]
+        )
+        count_value = res[0]['count(*)']
+        return count_value

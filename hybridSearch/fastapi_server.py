@@ -680,7 +680,7 @@ async def search_all_customName(
 
 
 
-def process_queries_hybrid(username: str ,queries: List[str], customNames: List[str], topk: int) -> Tuple[List[Tensor], List[List[int]], List[List[Tuple]]]:
+def process_queries_hybrid(username: str ,queries: List[str], customNames: List[str], topk: int,searchMethod:str):
     #TODO:-------探究这个地方的model为什么没有等待，是因为模型执行的很快吗，各个线程怎么调度的这一个模型---------
     query_embeddings = process_query(queryRewrit(queries, "english"))
     search_results_list = []
@@ -697,7 +697,17 @@ def process_queries_hybrid(username: str ,queries: List[str], customNames: List[
         
         #TODO:-------似乎所有的线程都执行在这开始等待retriever空闲出来,探究下这个地方，搞清楚怎么调度的--------
         hybrid_retriever = MilvusColbertRetriever(collection_name=username, milvus_client=client)
-        search_results = hybrid_retriever.Muti_hybrid_search(query_params,topk)
+        
+        if(searchMethod == "Muti_hybrid_search"):
+            search_results = hybrid_retriever.Muti_hybrid_search(query_params,topk)
+        elif(searchMethod == "Muti_hybrid_search_intersection"):
+            search_results = hybrid_retriever.Muti_hybrid_search_intersection(query_params,topk)
+        elif(searchMethod == "Muti_hybrid_search_img_in_text"):
+            search_results = hybrid_retriever.Muti_hybrid_search_img_in_text(query_params,topk)
+        elif(searchMethod == "Muti_hybrid_search_text_in_img"):
+            search_results = hybrid_retriever.Muti_hybrid_search_text_in_img(query_params,topk)
+        else:
+            logger.error("searchMethod出错")
         search_results_list.append(search_results)
     
     return search_results_list
@@ -706,11 +716,12 @@ def process_queries_hybrid(username: str ,queries: List[str], customNames: List[
 @app.post("/hybridSearch/")
 async def hybridSearch(
     request: Request,
-    username: str = Body(..., description="List of search queries",embed=True),
+    username: str = Body(..., description="string of username",embed=True),
     queries: List[str] = Body(..., description="List of search queries",embed=True),
-    uniqueIds: List[str] = Body(..., description="List of customName",embed=True),
+    uniqueIds: List[str] = Body(..., description="List of uniqueIds",embed=True),
     customNames: List[str] = Body(..., description="List of customName",embed=True),
-    topk: int = Body(5, ge=1, le=100, description="Number of results to return",embed=True)
+    topk: int = Body(5, ge=1, le=100, description="Number of results to return",embed=True),
+    searchMethod: str = Body("Muti_hybrid_search", description="Search method", embed=True)
 ) -> StreamingResponse:
     """
     执行多模态混合检索查询
@@ -734,10 +745,11 @@ async def hybridSearch(
             async with processing_lock:
                 processing_requests += 1
                 logger.info(f"待处理请求+1,当前{processing_requests}个")
-                
+            
+            logger.info(f"使用{searchMethod}方法")
             # 调用同步函数，处理第一个 for 循环
             search_results_list = await asyncio.to_thread(
-                process_queries_hybrid, username, queries, customNames, topk
+                process_queries_hybrid, username, queries, customNames, topk,searchMethod
             )
             
             async with processing_lock:

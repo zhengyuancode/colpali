@@ -160,7 +160,7 @@ def main():
         "customNames": customNames,
         "text_dense_vector": embeder.getTextEmbeddings(queries[0],768)
     }
-    res=retriever.Muti_hybrid_search(query_params,5)
+    res=retriever.Muti_hybrid_search_intersection(query_params,5)
     print(f"res:{res}")
     
     
