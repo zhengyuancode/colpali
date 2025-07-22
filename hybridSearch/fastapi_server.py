@@ -27,9 +27,13 @@ from FileUtil import delete_file_if_exists,delete_directory_and_contents
 import aiofiles
 from pdf_image import pdfToImage
 from colpali_process import processImg
-from text_embeding import QwenEmbeder,Embedding_client
+from text_embeding import QwenEmbeder
 from caption import getTextList
-
+import time
+from fastapi import Request
+import uuid
+import sys
+print("Python executable:", sys.executable)
 
 ZHIPUAPIKEY="f890fa44ea384a6baab00c725701a04b.1h0evvTQSAZALIp0"
 QWENAPIKEY="sk-f78b07615c8a45128d760579e6d42e1f"
@@ -116,10 +120,11 @@ device = None
 embeder = None
 image_dir = "./pages"
 filepaths = [os.path.join(image_dir, name) for name in os.listdir(image_dir)]
+searching_user=[]
 
 def initialize_service():
     """初始化服务所需的模型和检索器"""
-    global model, processor, retriever, device, embeder
+    global model, processor, retriever, device, embeder,searching_user
     
     logger.info("Initializing service...")
     start_time = time.time()
@@ -148,7 +153,7 @@ def initialize_service():
     
     # 初始化处理器
     processor = ColPaliProcessor.from_pretrained(model_name)
-    embeder=QwenEmbeder(client=Embedding_client)
+    embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
     
     # 初始化Milvus检索器
     logger.info("Initializing Milvus retriever...")
@@ -327,7 +332,7 @@ async def search(
                    
                 try:
                      response_stream  = AIclient.chat.completions.create(
-                        model="qwen-vl-max-latest", 
+                        model="qwen-vl-max", 
                         messages=[
                         {"role":"system","content":[{"type": "text", "text": "You are a military technology document understanding assistant and you answer questions in Chinese. You need to combine the provided document images to answer the questions."}]},
                         {
@@ -552,7 +557,7 @@ async def pre_process_rag(
     logger.info("获取caption文件...")
     caption_text_list_path = getTextList(
                                 str(custom_path)+f"/auto/{uniqueId}_content_list.json",
-                                language,
+                                "english",
                                 str(custom_path)+f"/auto/",
                                 str(custom_path)+f"/caption_text_list.json",
                                 AIclient
@@ -575,13 +580,12 @@ async def pre_process_rag(
     
     logger.info("开始写入向量数据库...")    
     for i, (Imgpath, embedding) in enumerate(zip(ImagePaths, ds)):
-        print(Imgpath)
         text = getTextByPath(Imgpath,caption_text_list_path)
         # 判断 text 是否为空（None 或空字符串）
         if text is None or text.strip() == "":
-            text_dense_value = [0.0] * 768
+            text_dense_value = [0.0] * 1024
         else:
-            text_dense_value = embeder.getTextEmbeddings(text, 768)
+            text_dense_value = embeder.getTextEmbeddings(text)
         data = {
             "colbert_vecs": embedding.float().cpu().numpy(),
             "doc_id": i,
@@ -692,7 +696,7 @@ def process_queries_hybrid(username: str ,queries: List[str], customNames: List[
             "image_query": query_np,
             "text_query": queries[0],
             "customNames": customNames,
-            "text_dense_vector": embeder.getTextEmbeddings(queries[0],768)
+            "text_dense_vector": embeder.getTextEmbeddings(queries[0])
         }
         
         #TODO:-------似乎所有的线程都执行在这开始等待retriever空闲出来,探究下这个地方，搞清楚怎么调度的--------
@@ -721,7 +725,7 @@ async def hybridSearch(
     uniqueIds: List[str] = Body(..., description="List of uniqueIds",embed=True),
     customNames: List[str] = Body(..., description="List of customName",embed=True),
     topk: int = Body(5, ge=1, le=100, description="Number of results to return",embed=True),
-    searchMethod: str = Body("Muti_hybrid_search", description="Search method", embed=True)
+    searchMethod: str = Body(..., description="Search method", embed=True)
 ) -> StreamingResponse:
     """
     执行多模态混合检索查询
@@ -733,7 +737,25 @@ async def hybridSearch(
     """
     logger.info(f"Received search request with {len(queries)} queries, topk={topk}")
     async def generate_stream():
+        if(username not in searching_user):
+            searching_user.append(username)
+        else:
+            error_block = {
+                    "type": "error",
+                    "content": f"该用户已有一个请求在队列中: {username}"
+                }
+            yield json.dumps(error_block) + "\n\n"
+            return
+        
         try:
+            if(searchMethod not in ["Muti_hybrid_search","Muti_hybrid_search_intersection","Muti_hybrid_search_img_in_text","Muti_hybrid_search_text_in_img"]):
+                logger.warning("非法的检索方法")
+                error_block = {
+                    "type": "error",
+                    "content": f"非法的检索方法: {searchMethod}"
+                }
+                yield json.dumps(error_block) + "\n\n"
+                return
             if await request.is_disconnected():
                 logger.warning("客户端已断开，终止流式响应")
                 return
@@ -799,7 +821,7 @@ async def hybridSearch(
                    
                 try:
                      response_stream  = AIclient.chat.completions.create(
-                        model="qwen-vl-max-latest", 
+                        model="qwen-vl-max", 
                         messages=[
                         {"role":"system","content":[{"type": "text", "text": "You need to combine the image information provided by the user's document page with your own knowledge base to answer the user's query. Your answer should be in Chinese."}]},
                         {
@@ -845,6 +867,8 @@ async def hybridSearch(
                     }
                     yield json.dumps(error_block) + "\n\n"
                 finally:
+                    if(username in searching_user): 
+                        searching_user.remove(username)
                     # 发送结束标记
                     yield json.dumps({"type": "end"}) + "\n\n"
                     if response_stream and hasattr(response_stream, 'close'):
@@ -853,6 +877,8 @@ async def hybridSearch(
             
                 
         except Exception as e:
+            if(username in searching_user): 
+                        searching_user.remove(username)
             logger.error(f"Error during search: {str(e)}")
             error_block = {
                 "type": "error",

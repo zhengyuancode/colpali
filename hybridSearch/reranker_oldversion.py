@@ -11,19 +11,10 @@ def text_rerank(documents,query,topk):
         return_documents=False
     )
     if resp.status_code == HTTPStatus.OK:
-        return(rerank_results_to_dict(resp["output"]["results"]))
+        return(resp)
     else:
-        return(rerank_results_to_dict(resp["output"]["results"]))
+        return(resp)
 
-def rerank_results_to_dict(results):
-    return [
-        {
-            "index": r.index,
-            "relevance_score": r.relevance_score,
-            "document": r.document
-        }
-        for r in results
-    ]
 
 if __name__ == '__main__':
-    print("")
+    text_rerank()

@@ -1,4 +1,4 @@
-from pymilvus import MilvusClient, DataType, Function, FunctionType
+from pymilvus import MilvusClient, DataType, Function, FunctionType,Collection
 import numpy as np
 import concurrent.futures
 from pymilvus import AnnSearchRequest
@@ -6,6 +6,7 @@ from pymilvus import RRFRanker
 import torch
 from reranker import text_rerank
 import json
+import time
 
 client = MilvusClient(uri="http://127.0.0.1:19530")
 
@@ -18,6 +19,7 @@ class MilvusColbertRetriever:
         if self.client.has_collection(collection_name=self.collection_name):
             self.client.load_collection(collection_name)
         self.dim = dim
+        
 
     def create_collection(self):
         # Create a new collection in Milvus for storing embeddings.
@@ -32,7 +34,7 @@ class MilvusColbertRetriever:
         schema.add_field(
             field_name="text", 
             datatype=DataType.VARCHAR, 
-            max_length=20000, 
+            max_length=10000, 
             enable_analyzer=True, 
             description="raw text of product description"
         )
@@ -185,19 +187,14 @@ class MilvusColbertRetriever:
                 "params": {},
                 "expr": f"customName in {customNames}",
                 }
-        try: 
-            results = self.client.search(
-                self.collection_name,
-                data,
-                limit=int(100),
-                anns_field="image_dense",
-                output_fields=["image_dense", "seq_id", "doc_id","customName"],
-                search_params=search_params,
-            )
-        except Exception as e:
-            print("colpali检索失败：\n")
-            print(str(e))
-                 
+        results = self.client.search(
+            self.collection_name,
+            data,
+            limit=int(100),
+            anns_field="image_dense",
+            output_fields=["image_dense", "seq_id", "doc_id","customName"],
+            search_params=search_params,
+        )
         docs = []
         seen = set()  # 用于跟踪已见的唯一标识
 
@@ -258,97 +255,95 @@ class MilvusColbertRetriever:
         
         
     def Muti_hybrid_search(self,query_param, topk, rerank_topn=50, weights=(0.4, 0.3, 0.3)):
-            # text semantic search (dense)
-            customNames = query_param["customNames"]
+        # text semantic search (dense)
+        customNames = query_param["customNames"]
+        
+        count = self.count_entity_customNames(customNames)
+        if(count >= rerank_topn*2):
+            rerank_topn = rerank_topn
+        elif(count < rerank_topn*2 and count > topk*2):
+            rerank_topn = count//2
+        elif(count < topk*2 and count >= topk):
+            rerank_topn = topk
+        else:
+            topk = count
+            rerank_topn =count
             
-            count = self.count_entity_customNames(customNames)
-            if(count >= rerank_topn*2):
-                rerank_topn = rerank_topn
-            elif(count < rerank_topn*2 and count > topk*2):
-                rerank_topn = count//2
-            elif(count < topk*2 and count >= topk):
-                rerank_topn = topk
-            else:
-                topk = count
-                rerank_topn =count
-                
-            search_param_1 = {
-                "data": [query_param["text_dense_vector"]],
-                "anns_field": "text_dense",
-                "param": {"nprobe": 10},
-                "expr": f"seq_id == 0 and customName in {customNames}",
-                "limit": rerank_topn
-            }
-            request_1 = AnnSearchRequest(**search_param_1)
-            
-            # full-text search (sparse)
-            search_param_2 = {
-                "data": [query_param["text_query"]],
-                "anns_field": "text_sparse",
-                "param": {"drop_ratio_search": 0.2},
-                "expr": f"seq_id == 0 and customName in {customNames}",
-                "limit": rerank_topn
-            }
-            request_2 = AnnSearchRequest(**search_param_2)
-            
-            request_3 = self.Img_search(query_param["image_query"],customNames,topk)
-            
-            
-            #先混合文本检索
-            RRFranker = RRFRanker(100)
-            reqs = [request_1,request_2]
-            res = client.hybrid_search(
-                collection_name=self.collection_name,
-                reqs=reqs,
-                ranker=RRFranker,
-                limit=topk,
-                output_fields=["doc"]
-            )
-            
-            #将图片特征点匹配结果与前面已混合的文本检索,提取每页图片的存储位置做并集，存入docs_res
-            docs_res=[]
-            seen = set()  # 用于跟踪已见的唯一标识
-            for hits in res:
-                for hit in hits:
-                    doc_t=hit["entity"]["doc"]
-                    unique_key = (doc_t)  # 创建不可变的唯一键
-                    # 仅当未出现过时才添加到列表
-                    if unique_key not in seen:
-                        seen.add(unique_key)
-                        docs_res.append(doc_t)
-
-            for item in request_3:
-                doc_img=item[2]
-                unique_key = (doc_img)
+        search_param_1 = {
+            "data": [query_param["text_dense_vector"]],
+            "anns_field": "text_dense",
+            "param": {"nprobe": 10},
+            "expr": f"seq_id == 0 and customName in {customNames}",
+            "limit": rerank_topn
+        }
+        request_1 = AnnSearchRequest(**search_param_1)
+        
+        # full-text search (sparse)
+        search_param_2 = {
+            "data": [query_param["text_query"]],
+            "anns_field": "text_sparse",
+            "param": {"drop_ratio_search": 0.2},
+            "expr": f"seq_id == 0 and customName in {customNames}",
+            "limit": rerank_topn
+        }
+        request_2 = AnnSearchRequest(**search_param_2)
+        
+        request_3 = self.Img_search(query_param["image_query"],customNames,topk)
+        
+        
+        #先混合文本检索
+        RRFranker = RRFRanker(100)
+        reqs = [request_1,request_2]
+        res = client.hybrid_search(
+            collection_name=self.collection_name,
+            reqs=reqs,
+            ranker=RRFranker,
+            limit=topk,
+            output_fields=["doc"]
+        )
+        
+        #将图片特征点匹配结果与前面已混合的文本检索,提取每页图片的存储位置做并集，存入docs_res
+        docs_res=[]
+        seen = set()  # 用于跟踪已见的唯一标识
+        for hits in res:
+            for hit in hits:
+                doc_t=hit["entity"]["doc"]
+                unique_key = (doc_t)  # 创建不可变的唯一键
+                # 仅当未出现过时才添加到列表
                 if unique_key not in seen:
-                        seen.add(unique_key)
-                        docs_res.append(doc_img)
-        
-        
-        #每页图的存储位置一定是一个唯一值，根据存储位置匹配数据库中的每一页的caption文本
-            doc_texts = client.query(
-                    collection_name=self.collection_name,
-                    filter=f"doc in {docs_res} and customName in {customNames}",
-                    output_fields=["text","doc"],
-                    limit=len(docs_res),
-                )    
-            
-            #构建model-rerank的请求，documents的索引顺序就是doc_texts里的顺序
-            documents=[]
-            for item in doc_texts:
-                documents.append(item["text"])
-            res = text_rerank(documents,query_param["text_query"],topk)
-            
-            
-            #获取响应中的重排的索引顺序，匹配对应索引顺序的图片存储位置并返回
-            search_output = []
-            for res_item in res:
-                search_output.append(doc_texts[res_item["index"]]["doc"])
-            
-            if(len(search_output) != topk):
-                print(f"向量查询出现问题，不足topk:\n{search_output}")
-            return search_output
+                    seen.add(unique_key)
+                    docs_res.append(doc_t)
 
+        for item in request_3:
+            doc_img=item[2]
+            unique_key = (doc_img)
+            if unique_key not in seen:
+                    seen.add(unique_key)
+                    docs_res.append(doc_img)
+       
+       
+       #每页图的存储位置一定是一个唯一值，根据存储位置匹配数据库中的每一页的caption文本
+        doc_texts = client.query(
+                collection_name=self.collection_name,
+                filter=f"doc in {docs_res} and customName in {customNames}",
+                output_fields=["text","doc"],
+                limit=len(docs_res),
+            )    
+        
+        #构建model-rerank的请求，documents的索引顺序就是doc_texts里的顺序
+        documents=[]
+        for item in doc_texts:
+            documents.append(item["text"])
+        res = text_rerank(documents,query_param["text_query"],topk)
+        
+        #获取响应中的重排的索引顺序，匹配对应索引顺序的图片存储位置并返回
+        search_output = []
+        for res_item in res:
+            search_output.append(doc_texts[res_item["index"]]["doc"])
+        
+        if(len(search_output) != topk or len(search_output) != count):
+            print(f"向量查询出现问题，不足topk:\n{search_output}")
+        return search_output
     
     def Muti_hybrid_search_intersection(self,query_param, topk, rerank_topn=50, weights=(0.4, 0.3, 0.3)):
         # text semantic search (dense)
@@ -422,7 +417,7 @@ class MilvusColbertRetriever:
                 output_fields=["text","doc"],
                 limit=len(docs_res),
             )    
-
+        
         #构建model-rerank的请求，documents的索引顺序就是doc_texts里的顺序
         documents=[]
         for item in doc_texts:
@@ -435,7 +430,7 @@ class MilvusColbertRetriever:
             search_output.append(doc_texts[res_item["index"]]["doc"])
         
         
-        if(len(search_output) != topk):
+        if(len(search_output) != topk or len(search_output) != count):
             print(f"向量查询出现问题，不足topk:\n{search_output}")
         return search_output
     
@@ -523,7 +518,7 @@ class MilvusColbertRetriever:
             "anns_field": "text_dense",
             "param": {"nprobe": 10},
             "expr": f"seq_id == 0 and customName in {customNames} and doc in {doc}",
-            "limit": topk
+            "limit": rerank_topn//2
         }
         request_1 = AnnSearchRequest(**search_param_1)
         
@@ -533,7 +528,7 @@ class MilvusColbertRetriever:
             "anns_field": "text_sparse",
             "param": {"drop_ratio_search": 0.2},
             "expr": f"seq_id == 0 and customName in {customNames} and doc in {doc}",
-            "limit": topk
+            "limit": rerank_topn//2
         }
         request_2 = AnnSearchRequest(**search_param_2)
         
@@ -555,15 +550,55 @@ class MilvusColbertRetriever:
                      
         return search_output   
 
+
+    def check_system_health(self):
+        """检查 Milvus、etcd 和 MinIO 的健康状态"""
+        try:
+            # 检查 Milvus 健康状态
+            milvus_container = self.docker_client.containers.get("milvus-standalone")
+            if milvus_container.status != "running":
+                return False
+
+            # 检查 etcd 健康状态
+            etcd_container = self.docker_client.containers.get("milvus-etcd")
+            if etcd_container.status != "running" or "unhealthy" in etcd_container.status:
+                return False
+
+            # 检查 MinIO 健康状态
+            minio_container = self.docker_client.containers.get("milvus-minio")
+            if minio_container.status != "running":
+                return False
+            return True
+        except Exception as e:
+            return False
+
+    def check_resource_usage(self):
+        """检查 Milvus 容器的 CPU 和内存使用率"""
+        try:
+            stats = self.docker_client.stats(container="milvus-standalone", stream=False)
+            mem_usage = stats["memory_stats"]["usage"]
+            mem_limit = stats["memory_stats"]["limit"]
+            cpu_usage = (stats["cpu_stats"]["cpu_usage"]["total_usage"] /
+                         stats["cpu_stats"]["system_cpu_usage"])
+
+            # 判断是否超过阈值（80%）
+            if mem_usage > 0.8 * mem_limit or cpu_usage > 0.8:
+                return False
+            return True
+        except Exception as e:
+            return False
+        
     def insert(self, data):
         # Insert ColBERT embeddings and metadata for a document into the collection.
         colbert_vecs = data["colbert_vecs"]
         seq_length = len(colbert_vecs)
 
+        # 分批处理，每批最多1000条
+        batch_size = 1500
        
-        self.client.insert(
-            self.collection_name,
-            [
+        for start_idx in range(0, seq_length, batch_size):
+            end_idx = min(start_idx + batch_size, seq_length)
+            batch_data = [
                 {
                     "image_dense": colbert_vecs[i],
                     "seq_id": i,
@@ -573,9 +608,23 @@ class MilvusColbertRetriever:
                     "text": data["text"] if i == 0 else "",
                     "text_dense": data["text_dense"] if i == 0 else ([0.0] * 1024)
                 }
-                for i in range(seq_length)
-            ],
-        )
+                for i in range(start_idx, end_idx)
+            ]
+            
+            try:
+                self.client.insert(
+                    collection_name=self.collection_name,
+                    data=batch_data,
+                    timeout=30
+                )
+                compaction_job_id = self.client.compact(
+                    collection_name=self.collection_name
+                )
+            except Exception as e:
+                print(f"Batch {start_idx}-{end_idx} failed: {e}")
+                # 可以选择重试或跳过
+
+
         
     def delete_entity(self,customName):
         res = client.delete(

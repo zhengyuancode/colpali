@@ -14,7 +14,7 @@ def run_mineru(input_path: str, output_path: str):
     异常:
         subprocess.CalledProcessError: 如果命令执行失败。
     """
-    command = ['/etc/anaconda3/envs/colpali/bin/mineru', '-p', input_path, '-o', output_path, '--source', 'local']
+    command = ['/etc/anaconda3/envs/colpali/bin/mineru', '-p', input_path, '-o', output_path, '--source', 'modelscope']
     
     try:
         result = subprocess.run(

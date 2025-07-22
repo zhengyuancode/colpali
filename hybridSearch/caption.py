@@ -2,6 +2,7 @@ from openai import OpenAI
 import json
 import base64
 from tqdm import tqdm
+import os
 
 # QWENAPIKEY="sk-f78b07615c8a45128d760579e6d42e1f"
 
@@ -72,12 +73,31 @@ def getTextList(block_path,language,image_dir,output_path,client):
 
         if item["type"] == "text":
             textList[page_idx] += item["text"]
+            
         elif item["type"] == "image":
-            caption = getCaption(image_dir + item["img_path"], language,client)
+            img_path=image_dir + item["img_path"]
+            caption = ""
+            if img_path and os.path.isfile(img_path):
+                caption += getCaption(image_dir + item["img_path"], language,client)
             textList[page_idx] += caption if caption is not None else ""
+            
         elif item["type"] == "table":
-            caption = getCaption(image_dir + item["img_path"], language,client)
+            img_path=image_dir + item["img_path"]
+            caption = ""
+            if img_path and os.path.isfile(img_path):
+                caption += getCaption(image_dir + item["img_path"], language,client)
+            if (str(item["table_caption"]) != "[]"):
+                caption += str(item["table_caption"])
             textList[page_idx] += caption if caption is not None else ""
+            
+        elif item["type"] == "equation":
+            img_path=image_dir + item["img_path"]
+            caption = ""
+            if img_path and os.path.isfile(img_path):
+                caption += getCaption(image_dir + item["img_path"], language,client)
+            caption += item["text"]
+            textList[page_idx] += caption if caption is not None else ""    
+            
         else:
             print(item)
             

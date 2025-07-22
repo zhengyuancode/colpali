@@ -7,27 +7,27 @@ from typing import List, cast
 from tqdm import tqdm
 from PIL import Image
 import os
-from milvus_conf_hybrid import MilvusColbertRetriever, client
+from milvus_conf_vidoseek import MilvusColbertRetriever, client
 import time
 import logging
 import re
 import json
-from text_embeding import QwenEmbeder
-# os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-# # 配置日志
-# logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-# logger = logging.getLogger(__name__)
+from text_embeding_vidoseek import QwenEmbeder
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# device = get_torch_device("cuda")
-# # model_name = "vidore/colpali-v1.2"
+device = get_torch_device("cuda")
+# model_name = "vidore/colpali-v1.2"
 
-# # 若已有模型文件直接指示到模型文件所在目录位置
-# colpali_model_name="/home/gpu/milvus/backend/colpali/modelcache/models--vidore--colpali-v1.2/snapshots/6b89bc63c16809af4d111bfe412e2ac6bc3c9451"
+# 若已有模型文件直接指示到模型文件所在目录位置
+colpali_model_name="/home/gpu/milvus/backend/colpali/modelcache/models--vidore--colpali-v1.2/snapshots/6b89bc63c16809af4d111bfe412e2ac6bc3c9451"
 
-# # colpali模型需要协同其他模型，指示第一次下载后的总缓存位置
-# cachedir="/home/gpu/milvus/backend/colpali/modelcache/"
+# colpali模型需要协同其他模型，指示第一次下载后的总缓存位置
+cachedir="/home/gpu/milvus/backend/colpali/modelcache/"
 
-# # 只获取图片路径列表，不实际加载图片
+# 只获取图片路径列表，不实际加载图片
 # image_dir = "./pages"
 # filepaths = [os.path.join(image_dir, name) for name in os.listdir(image_dir)]
 # logger.info(f"Found {len(filepaths)} images in directory")
@@ -35,20 +35,20 @@ from text_embeding import QwenEmbeder
 
 
 # 加载模型并显示加载时间
-# logger.info(f"Loading model: {colpali_model_name}")
-# model_load_start = time.time()
-# colpali_model = ColPali.from_pretrained(
-#     colpali_model_name,
-#     cache_dir=cachedir,
-#     torch_dtype=torch.bfloat16,
-#     device_map=device,
-#     local_files_only=True,
-#     use_safetensors=True
-# ).eval()
-# model_load_time = time.time() - model_load_start
-# logger.info(f"Model loaded in {model_load_time:.2f} seconds")
+logger.info(f"Loading model: {colpali_model_name}")
+model_load_start = time.time()
+colpali_model = ColPali.from_pretrained(
+    colpali_model_name,
+    cache_dir=cachedir,
+    torch_dtype=torch.bfloat16,
+    device_map=device,
+    local_files_only=True,
+    use_safetensors=True
+).eval()
+model_load_time = time.time() - model_load_start
+logger.info(f"Model loaded in {model_load_time:.2f} seconds")
 
-# processor = cast(ColPaliProcessor, ColPaliProcessor.from_pretrained(colpali_model_name))
+processor = cast(ColPaliProcessor, ColPaliProcessor.from_pretrained(colpali_model_name))
 
 # def processImageQuery(queries):
 #     dataloader = DataLoader(
@@ -98,8 +98,8 @@ def processImg(filepaths: List[str],Mymodel,Myprocessor,Mydevice):
         ds.extend(list(torch.unbind(embeddings_doc.to(Mydevice))))
     
     return ds
-
-def getTextByPath(filepath: str) -> str:
+    
+def getTextByPath(filepath: str,caption_text_list) -> str:
     try:
         # 1. 从文件名中提取页数
         filename = os.path.basename(filepath)  # 获取纯文件名（不含路径）
@@ -112,8 +112,7 @@ def getTextByPath(filepath: str) -> str:
         page_num = int(match.group(1))  # 提取数字部分并转为整数
         
         # 2. 读取 textList.json 文件 
-        json_path = "./textList.json"
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(caption_text_list, 'r', encoding='utf-8') as f:
             text_list = json.load(f)
         
         # 3. 获取对应页的文本（索引从0开始）
@@ -130,24 +129,59 @@ def getTextByPath(filepath: str) -> str:
         print(f"处理文件 {filepath} 时出错: {str(e)}")
         return ""
     
+def get_all_files(folder_path):
+    file_list = []
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            full_path = os.path.join(root, file)
+            file_list.append(full_path)
+    return file_list
+
+def extract_pdf_names(file_paths):
+    return [os.path.splitext(os.path.basename(path))[0] for path in file_paths]
+
 def main():
     # 初始化Milvus
-    # retriever = MilvusColbertRetriever(collection_name="colpali_hybrid", milvus_client=client)
-    # retriever.create_collection()
-    # retriever.create_index()
-    embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
+    retriever = MilvusColbertRetriever(collection_name="vidoseek", milvus_client=client)
+    retriever.create_collection()
+    retriever.create_index()
     
-    # # 处理图片并存入数据库
-    # ds = processImg(filepaths)
-    # for i, (path, embedding) in enumerate(zip(filepaths, ds)):
-    #     data = {
-    #         "colbert_vecs": embedding.float().cpu().numpy(),
-    #         "doc_id": i,
-    #         "filepath": path,
-    #         "text": getTextByPath(path),
-    #         "text_dense": embeder.getTextEmbeddings(getTextByPath(path),768)
-    #         }
-    #     retriever.insert(data)
+    url = "https://api.siliconflow.cn/v1/embeddings"
+    embeder=QwenEmbeder(url)
+    
+    
+    pdf_dir = "./pdf"
+    pdf_paths = get_all_files(pdf_dir)
+    pdf_names = extract_pdf_names(pdf_paths)
+    for pdf_name in pdf_names:
+        caption_text_list_path = f"./minerU_pdf/{pdf_name}/caption_text_list.json"
+        
+        image_dir = f"./minerU_pdf/{pdf_name}/pages"
+        filepaths = [os.path.join(image_dir, name) for name in os.listdir(image_dir)]
+        logger.info(f"Found {len(filepaths)} images in directory")
+        
+        # 处理图片并存入数据库
+        ds = processImg(filepaths,colpali_model,processor,device)
+        for i, (path, embedding) in enumerate(zip(filepaths, ds)):
+            text = getTextByPath(path,caption_text_list_path)
+            # 判断 text 是否为空（None 或空字符串）
+            if text is None or text.strip() == "":
+                text_dense_value = [0.0] * 1024
+            else:
+                text_dense_value = embeder.getTextEmbeddings(text)
+            data = {
+                "colbert_vecs": embedding.float().cpu().numpy(),
+                "doc_id": i,
+                "filepath": path,
+                "customName": os.path.splitext(os.path.basename(path))[0],
+                "text": text,
+                "text_dense": text_dense_value
+                }
+            # 插入数据并等待系统恢复
+            try:
+                retriever.insert(data)
+            except Exception as e:
+                logger.error(f"Failed to insert data for {path}: {e}")
     
     # 查询处理（可选）
     # queries = ["what is Structure for Counting PERSON-TYPEs?"]
