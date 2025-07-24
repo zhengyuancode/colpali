@@ -271,7 +271,7 @@ class MilvusColbertRetriever:
             else:
                 topk = count
                 rerank_topn =count
-                
+            print(f"topk:{topk}\ncount:{count}\n")    
             search_param_1 = {
                 "data": [query_param["text_dense_vector"]],
                 "anns_field": "text_dense",
@@ -364,7 +364,7 @@ class MilvusColbertRetriever:
         else:
             topk = count
             rerank_topn =count
-            
+        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")        
         search_param_1 = {
             "data": [query_param["text_dense_vector"]],
             "anns_field": "text_dense",
@@ -454,7 +454,7 @@ class MilvusColbertRetriever:
         else:
             topk = count
             rerank_topn =count
-            
+        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")         
         search_param_1 = {
             "data": [query_param["text_dense_vector"]],
             "anns_field": "text_dense",
@@ -511,7 +511,7 @@ class MilvusColbertRetriever:
         else:
             topk = count
             rerank_topn =count
-            
+        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")        
         request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn)
         doc = []
         for sitem in request_3:

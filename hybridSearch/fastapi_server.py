@@ -28,11 +28,13 @@ import aiofiles
 from pdf_image import pdfToImage
 from colpali_process import processImg
 from text_embeding import QwenEmbeder
-from caption import getTextList
+from caption import getTextList,getTextList_local
 import time
 from fastapi import Request
 import uuid
 import sys
+from transformers import pipeline
+
 print("Python executable:", sys.executable)
 
 ZHIPUAPIKEY="f890fa44ea384a6baab00c725701a04b.1h0evvTQSAZALIp0"
@@ -114,6 +116,7 @@ def process_query(queries: List[str]) -> List[torch.Tensor]:
 #-----------------------------------------------------------------------------------------------------------------------------
 # 全局模型和检索器实例
 model = None
+img_captioner = None
 processor = None
 retriever = None
 device = None
@@ -124,7 +127,7 @@ searching_user=[]
 
 def initialize_service():
     """初始化服务所需的模型和检索器"""
-    global model, processor, retriever, device, embeder,searching_user
+    global model, processor, retriever, device, embeder,searching_user,img_captioner
     
     logger.info("Initializing service...")
     start_time = time.time()
@@ -154,6 +157,11 @@ def initialize_service():
     # 初始化处理器
     processor = ColPaliProcessor.from_pretrained(model_name)
     embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
+    
+    img_captioner = pipeline(
+    task="image-to-text",
+    model="/home/gpu/milvus/backend/colpali/modelcache/models--Salesforce--blip-image-captioning-large/snapshots/353689b859fcf0523410b1806dace5fb46ecdf41"
+)
     
     # 初始化Milvus检索器
     logger.info("Initializing Milvus retriever...")
@@ -197,10 +205,11 @@ async def shutdown_event():
     # 这里可以添加资源释放逻辑
     try:
         # 1. 释放模型占用的GPU内存（核心操作）
-        global model
+        global model,img_captioner
         if model is not None:
             logger.info("Releasing model from GPU memory")
             del model  # 删除模型对象，释放其占用的显存
+            del img_captioner
         
         # 2. 清空当前进程的GPU缓存（可选，更彻底）
         # 注意：此操作仅影响当前进程的缓存，不影响其他进程
@@ -555,12 +564,19 @@ async def pre_process_rag(
     
     #TODO:获取caption文件,此过程较慢，可后续优化
     logger.info("获取caption文件...")
-    caption_text_list_path = getTextList(
+    # caption_text_list_path = getTextList(
+    #                             str(custom_path)+f"/auto/{uniqueId}_content_list.json",
+    #                             "english",
+    #                             str(custom_path)+f"/auto/",
+    #                             str(custom_path)+f"/caption_text_list.json",
+    #                             AIclient
+    #                             )
+    
+    caption_text_list_path = getTextList_local(
                                 str(custom_path)+f"/auto/{uniqueId}_content_list.json",
-                                "english",
                                 str(custom_path)+f"/auto/",
                                 str(custom_path)+f"/caption_text_list.json",
-                                AIclient
+                                img_captioner
                                 )
     
     #存入milvus
