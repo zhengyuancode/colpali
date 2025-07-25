@@ -170,30 +170,30 @@ class MilvusColbertRetriever:
         else:
             return scores
 
-    def Img_search(self, data,customNames, topk,doc=[]):
+    def Img_search(self, data,customNames, topk,doc_id=[]):
         # Perform a vector search on the collection to find the top-k most similar documents.
         # data是一个向量组，这里在进行批量检索
-        if(doc != []):
-            search_params = {
-                "metric_type": "IP", 
-                "params": {},
-                "expr": f"customName in {customNames} and doc in {doc}",
-                }
-        else:
-            search_params = {
-                "metric_type": "IP", 
-                "params": {},
-                "expr": f"customName in {customNames}",
-                }
         try: 
-            results = self.client.search(
-                self.collection_name,
-                data,
-                limit=int(100),
-                anns_field="image_dense",
-                output_fields=["image_dense", "seq_id", "doc_id","customName"],
-                search_params=search_params,
-            )
+            if(doc_id != []):
+                results = self.client.search(
+                    self.collection_name,
+                    data,
+                    limit=int(topk*1023),
+                    anns_field="image_dense",
+                    filter=f'customName in {customNames} and doc_id in {doc_id}',
+                    output_fields=["image_dense", "seq_id", "doc_id","customName"],
+                    search_params={"metric_type": "IP"}
+                )
+            else:
+                results = self.client.search(
+                    self.collection_name,
+                    data,
+                    limit=int(topk*1023),
+                    anns_field="image_dense",
+                    filter=f'customName in {customNames}',
+                    output_fields=["image_dense", "seq_id", "doc_id","customName"],
+                    search_params={"metric_type": "IP"}
+                )
         except Exception as e:
             print("colpali检索失败：\n")
             print(str(e))
@@ -216,16 +216,14 @@ class MilvusColbertRetriever:
                         "customName": custom_name
                     })
         scores = []
-
         def rerank_single_doc(doc, data, client, collection_name):
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
             doc_id = doc["doc_id"]
             customName = doc["customName"]
             doc_colbert_vecs = client.query(
                 collection_name=collection_name,
-                filter=f"doc_id in [{doc_id}] and customName in ['{customName}']",
-                output_fields=["seq_id", "image_dense", "doc"],
-                limit=1000,
+                filter=f'doc_id == {doc_id} and customName == "{customName}"',
+                output_fields=["seq_id", "image_dense", "doc"]
             )
             doc_vecs = np.vstack(
                 [doc_colbert_vecs[i]["image_dense"] for i in range(len(doc_colbert_vecs))]
@@ -271,7 +269,7 @@ class MilvusColbertRetriever:
             else:
                 topk = count
                 rerank_topn =count
-            print(f"topk:{topk}\ncount:{count}\n")    
+            # print(f"topk:{topk}\ncount:{count}\n")    
             search_param_1 = {
                 "data": [query_param["text_dense_vector"]],
                 "anns_field": "text_dense",
@@ -364,7 +362,7 @@ class MilvusColbertRetriever:
         else:
             topk = count
             rerank_topn =count
-        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")        
+        # print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")        
         search_param_1 = {
             "data": [query_param["text_dense_vector"]],
             "anns_field": "text_dense",
@@ -384,11 +382,11 @@ class MilvusColbertRetriever:
         }
         request_2 = AnnSearchRequest(**search_param_2)
         
-        if(topk*2 > count):
-            request_3 = self.Img_search(query_param["image_query"],customNames,count)
-        else:
-            request_3 = self.Img_search(query_param["image_query"],customNames,topk*2)
-
+        # if(topk*2 > count):
+        #     request_3 = self.Img_search(query_param["image_query"],customNames,count)
+        # else:
+        #     request_3 = self.Img_search(query_param["image_query"],customNames,topk*2)
+        request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn)
         #先混合文本检索
         RRFranker = RRFRanker(100)
         reqs = [request_1,request_2]
@@ -396,7 +394,7 @@ class MilvusColbertRetriever:
             collection_name=self.collection_name,
             reqs=reqs,
             ranker=RRFranker,
-            limit=topk*2,
+            limit=rerank_topn,
             output_fields=["doc"]
         )
         
@@ -454,7 +452,7 @@ class MilvusColbertRetriever:
         else:
             topk = count
             rerank_topn =count
-        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")         
+        # print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")         
         search_param_1 = {
             "data": [query_param["text_dense_vector"]],
             "anns_field": "text_dense",
@@ -482,16 +480,13 @@ class MilvusColbertRetriever:
             reqs=reqs,
             ranker=RRFranker,
             limit=rerank_topn,
-            output_fields=["doc"]
+            output_fields=["doc","doc_id"]
         )
-        
-        doc=[]
+        doc_id=[]
         for resItem in res:
             for item in resItem:
-                doc.append(item["doc"])
-        
-        request_3 = self.Img_search(query_param["image_query"],customNames,topk,doc)
-        
+                doc_id.append(item["doc_id"])
+        request_3 = self.Img_search(query_param["image_query"],customNames,topk,doc_id)
         search_output = []
         for sitem in request_3:
             search_output.append(sitem[2])
@@ -511,7 +506,7 @@ class MilvusColbertRetriever:
         else:
             topk = count
             rerank_topn =count
-        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")        
+        # print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")        
         request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn)
         doc = []
         for sitem in request_3:
