@@ -87,12 +87,15 @@ class MilvusColbertRetriever:
     def Img_search(self, data,customNames, topk,doc_id=[]):
         # Perform a vector search on the collection to find the top-k most similar documents.
         # data是一个向量组，这里在进行批量检索
+        limit_num = int(topk*1023)
+        if (limit_num >= 16384):
+            limit_num = 16383
         try: 
             if(doc_id != []):
                 results = self.client.search(
                     self.collection_name,
                     data,
-                    limit=int(topk*1023),
+                    limit=limit_num,
                     anns_field="multiple_image_dense",
                     filter=f'customName in {customNames} and doc_id in {doc_id}',
                     output_fields=["multiple_image_dense", "seq_id", "doc_id","customName"],
@@ -102,7 +105,7 @@ class MilvusColbertRetriever:
                 results = self.client.search(
                     self.collection_name,
                     data,
-                    limit=int(topk*1023),
+                    limit=limit_num,
                     anns_field="multiple_image_dense",
                     filter=f'customName in {customNames}',
                     output_fields=["multiple_image_dense", "seq_id", "doc_id","customName"],
@@ -184,7 +187,7 @@ class MilvusColbertRetriever:
         else:
             topk = count
             rerank_topn =count
-        # print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")       
+        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")       
         
         res = client.search(
             collection_name=self.collection_name,
@@ -207,6 +210,41 @@ class MilvusColbertRetriever:
         
         return search_output
         
+    def Muti_hybrid_search_single_in_multiple(self,query_param, topk, rerank_topn=50):
+        customNames = query_param["customNames"]
+        
+        count = self.count_entity_customNames(customNames)
+        if(count >= rerank_topn*2):
+            rerank_topn = rerank_topn
+        elif(count < rerank_topn*2 and count > topk*2):
+            rerank_topn = count//2
+        elif(count < topk*2 and count >= topk):
+            rerank_topn = topk
+        else:
+            topk = count
+            rerank_topn =count
+        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")        
+        request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn)
+        doc = []
+        for sitem in request_3:
+            doc.append(sitem[2])
+            
+        res = client.search(
+            collection_name=self.collection_name,
+            anns_field="single_image_dense",
+            data=[query_param["single_img_qs"]],
+            limit=topk,
+            search_params={"nprobe": 10,"metric_type": "IP"},
+            filter=f"seq_id == 0 and customName in {customNames} and doc in {doc}",
+            output_fields=["doc"]
+        )
+        
+        search_output=[]
+        for resItem in res:
+            for item in resItem:
+                search_output.append(item["doc"])
+                     
+        return search_output
 
     def insert(self, data):
         multiple_image_dense = data["multiple_image_dense"]

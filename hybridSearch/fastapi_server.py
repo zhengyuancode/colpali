@@ -16,6 +16,7 @@ from colpali_engine.models import ColPali
 from colpali_engine.models.paligemma.colpali.processing_colpali import ColPaliProcessor
 from colpali_engine.utils.torch_utils import get_torch_device,ListDataset
 from milvus_conf_hybrid import MilvusColbertRetriever, client
+from milvus_conf_img_hybrid import MilvusColbertRetriever as MilvusColbertRetriever_img,client as client_img
 import os
 from openai import OpenAI
 import base64
@@ -26,7 +27,7 @@ from mineru_process import run_mineru
 from FileUtil import delete_file_if_exists,delete_directory_and_contents
 import aiofiles
 from pdf_image import pdfToImage
-from colpali_process import processImg
+from colpali_process import processImg, processImg_single
 from text_embeding import QwenEmbeder
 from caption import getTextList,getTextList_local
 import time
@@ -34,6 +35,8 @@ from fastapi import Request
 import uuid
 import sys
 from transformers import pipeline
+from transformers import AutoModel
+from searchain import getQueries,getHistoricalAns,parse_coq_string,getQAcheck
 
 print("Python executable:", sys.executable)
 
@@ -116,6 +119,7 @@ def process_query(queries: List[str]) -> List[torch.Tensor]:
 #-----------------------------------------------------------------------------------------------------------------------------
 # 全局模型和检索器实例
 model = None
+model_2 = None
 img_captioner = None
 processor = None
 retriever = None
@@ -127,7 +131,7 @@ searching_user=[]
 
 def initialize_service():
     """初始化服务所需的模型和检索器"""
-    global model, processor, retriever, device, embeder,searching_user,img_captioner
+    global model, model_2, processor, retriever, device, embeder,searching_user,img_captioner
     
     logger.info("Initializing service...")
     start_time = time.time()
@@ -138,9 +142,10 @@ def initialize_service():
     
     # 模型路径配置
     model_name = "/home/gpu/milvus/backend/colpali/modelcache/models--vidore--colpali-v1.2/snapshots/6b89bc63c16809af4d111bfe412e2ac6bc3c9451"
+    model_name_2 = "/home/gpu/milvus/backend/colpali/modelcache/models--jinaai--jina-embeddings-v4/snapshots/50cb06ee0b17a7257c8caf4417c2a7596eb7e5d2"
     cachedir = "/home/gpu/milvus/backend/colpali/modelcache/"
     
-    # 加载模型
+    # 加载模型 1
     logger.info(f"Loading model: {model_name}")
     model_load_start = time.time()
     model = ColPali.from_pretrained(
@@ -154,6 +159,20 @@ def initialize_service():
     model_load_time = time.time() - model_load_start
     logger.info(f"Model loaded in {model_load_time:.2f} seconds")
     
+    # 加载模型 2
+    logger.info(f"Loading model: {model_name_2}")
+    model_load_start_2 = time.time()
+    model_2 = AutoModel.from_pretrained(
+        model_name_2,
+        trust_remote_code=True,
+        torch_dtype=torch.float16,
+        cache_dir=cachedir,                # 指定缓存路径
+        local_files_only=True,              # 强制离线加载
+    )
+    model_2.to("cuda")
+    model_load_time_2 = time.time() - model_load_start_2
+    logger.info(f"Model loaded in {model_load_time_2:.2f} seconds")
+    
     # 初始化处理器
     processor = ColPaliProcessor.from_pretrained(model_name)
     embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
@@ -165,6 +184,7 @@ def initialize_service():
     
     # 初始化Milvus检索器
     logger.info("Initializing Milvus retriever...")
+    print("Initializing Milvus retriever...")
     retriever = MilvusColbertRetriever(collection_name="colpali", milvus_client=client)
     logger.info("Service initialization completed")
     
@@ -205,11 +225,13 @@ async def shutdown_event():
     # 这里可以添加资源释放逻辑
     try:
         # 1. 释放模型占用的GPU内存（核心操作）
-        global model,img_captioner
+        global model,img_captioner,model_2
         if model is not None:
             logger.info("Releasing model from GPU memory")
             del model  # 删除模型对象，释放其占用的显存
             del img_captioner
+        if model_2 is not None:
+            del model_2
         
         # 2. 清空当前进程的GPU缓存（可选，更彻底）
         # 注意：此操作仅影响当前进程的缓存，不影响其他进程
@@ -343,7 +365,7 @@ async def search(
                      response_stream  = AIclient.chat.completions.create(
                         model="qwen-vl-max", 
                         messages=[
-                        {"role":"system","content":[{"type": "text", "text": "You are a military technology document understanding assistant and you answer questions in Chinese. You need to combine the provided document images to answer the questions."}]},
+                        # {"role":"system","content":[{"type": "text", "text": "You are a military technology document understanding assistant and you answer questions in Chinese. You need to combine the provided document images to answer the questions."}]},
                         {
                             "role": "user",
                             "content": base64_images + [{"type": "text", "text": queries[j]}]
@@ -582,8 +604,9 @@ async def pre_process_rag(
     #存入milvus
     
     #获取图片向量组
-    logger.info("获取图片向量组...")
+    logger.info("获取图片向量组和单向量...")
     ds = processImg(ImagePaths,model,processor,device)
+    single_img_vecs = processImg_single(ImagePaths,model_2)
     
     # 初始化Milvus
     if(client.has_collection(collection_name=username)):
@@ -593,9 +616,17 @@ async def pre_process_rag(
         retriever = MilvusColbertRetriever(collection_name=username, milvus_client=client)
         retriever.create_collection()
         retriever.create_index()
+        
+    if(client_img.has_collection(collection_name=username+"_img")):
+        logger.info("用户已存在向量数据库(纯图像RAG版本)")
+        retriever_img = MilvusColbertRetriever_img(collection_name=username+"_img", milvus_client=client_img)
+    else:
+        retriever_img = MilvusColbertRetriever_img(collection_name=username+"_img", milvus_client=client_img)
+        retriever_img.create_collection()
+        retriever_img.create_index()
     
     logger.info("开始写入向量数据库...")    
-    for i, (Imgpath, embedding) in enumerate(zip(ImagePaths, ds)):
+    for i, (Imgpath, embedding, single_img_embedding) in enumerate(zip(ImagePaths, ds, single_img_vecs)):
         text = getTextByPath(Imgpath,caption_text_list_path)
         # 判断 text 是否为空（None 或空字符串）
         if text is None or text.strip() == "":
@@ -611,6 +642,15 @@ async def pre_process_rag(
             "text_dense": text_dense_value
             }
         retriever.insert(data)
+        
+        data_img = {
+            "multiple_image_dense": embedding.float().cpu().numpy(),
+            "doc_id": i,
+            "filepath": Imgpath,
+            "single_image_dense":single_img_embedding[0],
+            "customName": customName
+            }
+        retriever_img.insert(data_img)
 
     return {"message": "RAG知识库搭建成功"}
 
@@ -628,8 +668,15 @@ async def delete_RAG(
         logger.info("用户无RAG向量库")
         raise HTTPException(status_code=404, detail="用户无RAG向量库")
     
+    if(client_img.has_collection(collection_name=username+"_img")):
+        retriever_img = MilvusColbertRetriever_img(collection_name=username+"_img", milvus_client=client_img)
+    else:
+        logger.info("用户无RAG_img向量库")
+        raise HTTPException(status_code=404, detail="用户无RAG_img向量库")
+    
     logger.info(f"删除知识库为{customName}的向量实体...")
     retriever.delete_entity(customName)
+    retriever_img.delete_entity(customName)
     
     dir_deleted = delete_directory_and_contents(f"./pdfs/{username}/{uniqueId}/pages")
     file_deleted = delete_file_if_exists(f"./pdfs/{username}/{uniqueId}/caption_text_list.json")
@@ -703,32 +750,53 @@ async def search_all_customName(
 def process_queries_hybrid(username: str ,queries: List[str], customNames: List[str], topk: int,searchMethod:str):
     #TODO:-------探究这个地方的model为什么没有等待，是因为模型执行的很快吗，各个线程怎么调度的这一个模型---------
     query_embeddings = process_query(queryRewrit(queries, "english"))
+    
+    single_img_qs = model_2.encode_text(texts=queries, task="text-matching")
+    
     search_results_list = []
     
     for i, query_emb in enumerate(query_embeddings):
         query_np = query_emb.float().cpu().numpy()
-        #query_np是查询组里每一句查询的二维数组
-        query_params={
-            "image_query": query_np,
-            "text_query": queries[0],
-            "customNames": customNames,
-            "text_dense_vector": embeder.getTextEmbeddings(queries[0])
-        }
-        
-        #TODO:-------似乎所有的线程都执行在这开始等待retriever空闲出来,探究下这个地方，搞清楚怎么调度的--------
-        hybrid_retriever = MilvusColbertRetriever(collection_name=username, milvus_client=client)
-        
-        if(searchMethod == "Muti_hybrid_search"):
-            search_results = hybrid_retriever.Muti_hybrid_search(query_params,topk)
-        elif(searchMethod == "Muti_hybrid_search_intersection"):
-            search_results = hybrid_retriever.Muti_hybrid_search_intersection(query_params,topk)
-        elif(searchMethod == "Muti_hybrid_search_img_in_text"):
-            search_results = hybrid_retriever.Muti_hybrid_search_img_in_text(query_params,topk)
-        elif(searchMethod == "Muti_hybrid_search_text_in_img"):
-            search_results = hybrid_retriever.Muti_hybrid_search_text_in_img(query_params,topk)
-        else:
-            logger.error("searchMethod出错")
-        search_results_list.append(search_results)
+        if(searchMethod in ["Muti_hybrid_search_single_in_multiple","Muti_hybrid_search_multiple_in_single"]):
+            query_params_img={
+                "image_query": query_np,
+                "customNames": customNames,
+                "single_img_qs": single_img_qs[0].float().cpu().numpy()
+            }
+            
+            hybrid_retriever_img = MilvusColbertRetriever_img(collection_name=username+"_img", milvus_client=client_img)
+            
+            if(searchMethod == "Muti_hybrid_search_single_in_multiple"):
+                search_results = hybrid_retriever_img.Muti_hybrid_search_single_in_multiple(query_params_img,topk)
+            elif(searchMethod == "Muti_hybrid_search_multiple_in_single"):
+                search_results = hybrid_retriever_img.Muti_hybrid_search_multiple_in_single(query_params_img,topk)
+            else:
+                logger.error("searchMethod出错")
+            search_results_list.append(search_results)
+             
+        else:  
+            #query_np是查询组里每一句查询的二维数组
+            query_params={
+                "image_query": query_np,
+                "text_query": queries[0],
+                "customNames": customNames,
+                "text_dense_vector": embeder.getTextEmbeddings(queries[0])
+            }
+            
+            #TODO:-------似乎所有的线程都执行在这开始等待retriever空闲出来,探究下这个地方，搞清楚怎么调度的--------
+            hybrid_retriever = MilvusColbertRetriever(collection_name=username, milvus_client=client)
+            
+            if(searchMethod == "Muti_hybrid_search"):
+                search_results = hybrid_retriever.Muti_hybrid_search(query_params,topk)
+            elif(searchMethod == "Muti_hybrid_search_intersection"):
+                search_results = hybrid_retriever.Muti_hybrid_search_intersection(query_params,topk)
+            elif(searchMethod == "Muti_hybrid_search_img_in_text"):
+                search_results = hybrid_retriever.Muti_hybrid_search_img_in_text(query_params,topk)
+            elif(searchMethod == "Muti_hybrid_search_text_in_img"):
+                search_results = hybrid_retriever.Muti_hybrid_search_text_in_img(query_params,topk)
+            else:
+                logger.error("searchMethod出错")
+            search_results_list.append(search_results)
     
     return search_results_list
 
@@ -764,7 +832,7 @@ async def hybridSearch(
             return
         
         try:
-            if(searchMethod not in ["Muti_hybrid_search","Muti_hybrid_search_intersection","Muti_hybrid_search_img_in_text","Muti_hybrid_search_text_in_img"]):
+            if(searchMethod not in ["Muti_hybrid_search","Muti_hybrid_search_intersection","Muti_hybrid_search_img_in_text","Muti_hybrid_search_text_in_img","Muti_hybrid_search_multiple_in_single","Muti_hybrid_search_single_in_multiple"]):
                 logger.warning("非法的检索方法")
                 error_block = {
                     "type": "error",
@@ -785,6 +853,7 @@ async def hybridSearch(
                 logger.info(f"待处理请求+1,当前{processing_requests}个")
             
             logger.info(f"使用{searchMethod}方法")
+            print(f"使用{searchMethod}方法")
             # 调用同步函数，处理第一个 for 循环
             search_results_list = await asyncio.to_thread(
                 process_queries_hybrid, username, queries, customNames, topk,searchMethod
@@ -911,7 +980,157 @@ async def hybridSearch(
             "X-Accel-Buffering": "no"
         }
     )
+
+def checkQA(query,answer,username,customNames,topk,searchMethod):
+    search_results_list = process_queries_hybrid(username,[query],customNames,topk,searchMethod)
+    #默认只有一个查询
+    search_results = search_results_list[0]
+    base64_images=[]
+    for image_path in search_results:
+        base64_str = image_to_base64(image_path) 
+        base64_images.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{base64_str}"}
+        })
+    checkAns = getQAcheck(query,answer,base64_images)
+    if(checkAns.lower() == "yes"):
+        return "yes"
+    else:
+        return base64_images
     
+    
+@app.post("/hybridSearch_MultiHop/")
+async def hybridSearch_MultiHop(
+    request: Request,
+    username: str = Body(..., description="string of username",embed=True),
+    queries: List[str] = Body(..., description="List of search queries",embed=True),
+    uniqueIds: List[str] = Body(..., description="List of uniqueIds",embed=True),
+    customNames: List[str] = Body(..., description="List of customName",embed=True),
+    topk: int = Body(5, ge=1, le=100, description="Number of results to return",embed=True),
+    searchMethod: str = Body(..., description="Search method", embed=True),
+    Q_count_max: int = Body(5, ge=1, le=100, description="Number of CoQ_nodes_max",embed=True)
+) -> StreamingResponse:
+    """
+    执行多模态混合多跳检索查询
+    
+    """
+    logger.info(f"Received search request with {len(queries)} queries, topk={topk}")
+    async def generate_stream():
+        if(username not in searching_user):
+            searching_user.append(username)
+        else:
+            error_block = {
+                    "type": "error",
+                    "content": f"该用户已有一个请求在队列中: {username}"
+                }
+            yield json.dumps(error_block) + "\n\n"
+            return
+        
+        try:
+            if(searchMethod not in ["Muti_hybrid_search","Muti_hybrid_search_intersection","Muti_hybrid_search_img_in_text","Muti_hybrid_search_text_in_img","Muti_hybrid_search_multiple_in_single","Muti_hybrid_search_single_in_multiple"]):
+                logger.warning("非法的检索方法")
+                error_block = {
+                    "type": "error",
+                    "content": f"非法的检索方法: {searchMethod}"
+                }
+                yield json.dumps(error_block) + "\n\n"
+                return
+            if await request.is_disconnected():
+                logger.warning("客户端已断开，终止流式响应")
+                return
+            
+            global processing_requests
+            
+            
+             # 使用锁确保修改 processing_requests 是原子的
+            async with processing_lock:
+                processing_requests += 1
+                logger.info(f"待处理请求+1,当前{processing_requests}个")
+            
+            logger.info(f"使用{searchMethod}方法")
+            print(f"使用{searchMethod}方法")
+            
+            #进行多跳逻辑,默认queries列表中一次查询里只有一个query
+            #-----------------------------------------------------------------------
+            isMultiHop = True
+            isExceed = False
+            history=""
+            base64_images=[]
+            CoQ=None
+            historical_right_CoQ=[]
+            while(isMultiHop):
+                print(f"history:{history}")
+                CoQ = getQueries(queries[0],history,Q_count_max,base64_images)
+                print(CoQ)
+                chain = CoQ["chain"]
+                for i in range(0,len(chain)):
+                    if(i+1 <= len(historical_right_CoQ)):
+                        continue
+                    if(chain[i]["unsolved_query"] != ""):
+                        multi_search_results_list = await asyncio.to_thread(
+                            process_queries_hybrid, 
+                            username, 
+                            [chain[i]["unsolved_query"]], 
+                            customNames, 
+                            topk,
+                            searchMethod
+                        )
+                        for image_path in multi_search_results_list[0]:
+                            base64_str = image_to_base64(image_path) 
+                            base64_images.append({
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{base64_str}"}
+                            })
+                        break
+                    #节点检查方法判断节点答案正确性
+                    checkQAans = checkQA(chain[i]["query"],chain[i]["answer"],username,customNames,topk,searchMethod)
+                    if(not isinstance(checkQAans, str)):
+                        base64_images = checkQAans
+                        break
+                        
+                    if(len(historical_right_CoQ) < Q_count_max):   
+                        historical_right_CoQ.append(chain[i])
+                    if(len(historical_right_CoQ) >= Q_count_max):
+                        isMultiHop = False
+                        isExceed = True
+                    if(i == len(chain) - 1):
+                        isMultiHop = False
+                history = getHistoricalAns(historical_right_CoQ)        
+
+
+            #------------------------------------------------------------------------
+            async with processing_lock:
+                processing_requests -= 1
+                logger.info(f"待处理请求-1,当前{processing_requests}个")
+            
+            if await request.is_disconnected():
+                logger.warning("客户端已断开，终止流式响应")
+                return
+            #--------------------------------------------------------------------------------------------------
+            if(isExceed):
+                print("超出多跳推理最大节点数")
+            else:
+                print(CoQ)  
+                
+        except Exception as e:
+            if(username in searching_user): 
+                        searching_user.remove(username)
+            logger.error(f"Error during search: {str(e)}")
+            error_block = {
+                "type": "error",
+                "content": f"处理请求时出错: {str(e)}"
+            }
+            yield json.dumps(error_block) + "\n\n"
+        
+    return StreamingResponse(
+        generate_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Connection": "keep-alive",
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
     
 if __name__ == "__main__":
     import uvicorn

@@ -606,3 +606,12 @@ class MilvusColbertRetriever:
         )
         count_value = res[0]['count(*)']
         return count_value
+    
+    def count_customNames_count(self):
+        res = client.query(
+            collection_name=self.collection_name,
+            filter=f"seq_id == 0 and doc_id == 0",
+            output_fields=["count(*)"]
+        )
+        count_value = res[0]['count(*)']
+        return count_value

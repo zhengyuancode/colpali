@@ -30,7 +30,7 @@ colpali_model_name="/home/gpu/milvus/backend/colpali/modelcache/models--vidore--
 cachedir="/home/gpu/milvus/backend/colpali/modelcache/"
 
 # 只获取图片路径列表，不实际加载图片
-image_dir = "./pdfs/dzy/c8ecadbb-f3b9-4d28-97e8-fb70f01223f4/pages"
+image_dir = "/home/gpu/milvus/backend/colpali/pdfs/dzy/884471c3-30a6-42d6-a358-6bf2fa1643d1/pages"
 filepaths = [os.path.join(image_dir, name) for name in os.listdir(image_dir)]
 # logger.info(f"Found {len(filepaths)} images in directory")
 
@@ -134,7 +134,7 @@ def getTextByPath(filepath: str) -> str:
     
 def main():
     # 初始化Milvus
-    retriever = MilvusColbertRetriever(collection_name="colpali_hybrid_jina", milvus_client=client)
+    retriever = MilvusColbertRetriever(collection_name="dzy_img", milvus_client=client)
     # retriever.create_collection()
     # retriever.create_index()
     # embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
@@ -178,10 +178,13 @@ def main():
     # 实际单次交互中一次只会有一句查询
     query_params={
         "image_query": Image_qs[0].float().cpu().numpy(),
-        "customNames": ["test"],
+        "customNames": ["customName"],
         "single_img_qs": single_img_qs[0].float().cpu().numpy()
     }
+    print(retriever.Muti_hybrid_search_single_in_multiple(query_params,5))
     print(retriever.Muti_hybrid_search_multiple_in_single(query_params,5))
+    # print(retriever.count_entity())
+
 
     
     

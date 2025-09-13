@@ -99,6 +99,16 @@ def processImg(filepaths: List[str],Mymodel,Myprocessor,Mydevice):
     
     return ds
 
+def processImg_single(filepaths: List[str],Mymodel):
+    single_img_vec=[]
+    for path in filepaths:
+        image_embeddings = Mymodel.encode_image(
+                images=[path],
+                task="retrieval"
+            )
+        single_img_vec.append(image_embeddings)
+    return single_img_vec
+
 def getTextByPath(filepath: str) -> str:
     try:
         # 1. 从文件名中提取页数
@@ -132,10 +142,17 @@ def getTextByPath(filepath: str) -> str:
     
 def main():
     # 初始化Milvus
-    # retriever = MilvusColbertRetriever(collection_name="colpali_hybrid", milvus_client=client)
+    retriever = MilvusColbertRetriever(collection_name="vidoseek", milvus_client=client)
+    # print(retriever.count_customNames_count())
+    # print(retriever.delete_entity("009fba61d172d2e380aa6271996751b3433cfdf6"))
+    # print(retriever.count_customNames_count())
+    # print(retriever.search_all_customName())
+    print(retriever.count_entity_customNames(["009fba61d172d2e380aa6271996751b3433cfdf6"]))
+    
+    
     # retriever.create_collection()
     # retriever.create_index()
-    embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
+    # embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
     
     # # 处理图片并存入数据库
     # ds = processImg(filepaths)
