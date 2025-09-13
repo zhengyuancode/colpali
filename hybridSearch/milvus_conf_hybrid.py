@@ -1,4 +1,5 @@
 from pymilvus import MilvusClient, DataType, Function, FunctionType
+from pymilvus.bulk_writer import bulk_import,get_import_progress
 import numpy as np
 import concurrent.futures
 from pymilvus import AnnSearchRequest
@@ -6,8 +7,18 @@ from pymilvus import RRFRanker
 import torch
 from reranker import text_rerank
 import json
+from minio import Minio
+from minio.error import S3Error
+import os
+from pathlib import Path
+import json
 
+
+uri = "http://127.0.0.1:19530"
 client = MilvusClient(uri="http://127.0.0.1:19530")
+
+
+
 
 class MilvusColbertRetriever:
     def __init__(self, milvus_client, collection_name, dim=128):
@@ -571,6 +582,88 @@ class MilvusColbertRetriever:
                 for i in range(seq_length)
             ],
         )
+        
+    def bulk_insert_prepare(self, data,writer):
+        colbert_vecs = data["colbert_vecs"]
+        seq_length = len(colbert_vecs)
+        for i in range(seq_length):
+            writer.append_row({
+                "text":data["text"] if i == 0 else "",
+                "text_dense":data["text_dense"] if i == 0 else ([0.0] * 1024),
+                "image_dense":colbert_vecs[i],
+                "seq_id":i,
+                "doc_id":data["doc_id"],
+                "doc":data["filepath"] if i == 0 else "",
+                "customName":data["customName"]
+            })
+    
+    def bulk_prepare_commit(self,writer):
+        writer.commit()
+        # print('committed')
+        # print(writer.batch_files)
+        
+    def bulk_LocalData_upload(self,bulk_prepare_localpath,uuid):
+        remote_files = []
+        bucket_name = "a-bucket"  # Milvus默认存储桶名称
+        try:
+            print("Prepare upload files")
+            minio_client = Minio(
+                endpoint="localhost:9000",  # MinIO默认地址和端口
+                access_key="minioadmin",    # 默认访问密钥
+                secret_key="minioadmin",    # 默认密钥
+                secure=False               # 不使用SSL
+            )
+            found = minio_client.bucket_exists(bucket_name)
+            if not found:
+                minio_client.make_bucket(bucket_name)
+                print("MinIO bucket '{}' doesn't exist".format(bucket_name))
+                return False, []
+            # set your remote data path
+            remote_data_path = "milvus_bulkinsert"
+            def upload_file(f: str):
+                file_name = os.path.basename(f)
+                minio_file_path = os.path.join(remote_data_path, "parquet", file_name)
+                minio_client.fput_object(bucket_name, minio_file_path, f)
+                print("Upload file '{}' to '{}'".format(f, minio_file_path))
+                remote_files.append(minio_file_path)
+                
+            #上传本地文件
+            batch_files_dir = Path(bulk_prepare_localpath+"/"+uuid)    
+            parquet_files = batch_files_dir.glob("*.parquet")
+            parquet_lists = []
+            for file_path in parquet_files:
+                filename = file_path.name
+                parquet_lists.append([bulk_prepare_localpath+"/"+uuid+"/"+filename])
+            for batch in parquet_lists:
+                for parquet in batch:
+                    upload_file(parquet)
+        except S3Error as e:
+            print("Failed to connect MinIO server {}, error: {}".format("localhost:9000", e))
+            return False, []
+        print("Successfully upload files: {}".format(remote_files))
+        return remote_files
+    
+    
+    def bulk_minio_insert_milvus(self,collection_name,files):
+        resp = bulk_import(
+            url=uri,
+            collection_name=collection_name,
+            files=files,
+        )
+
+        job_id = resp.json()['data']['jobId']
+        print(job_id)
+        
+        
+    
+    def search_import_progress(self,job_id):
+        resp = get_import_progress(
+            url=uri,
+            job_id=job_id,
+        )
+        
+        print(json.dumps(resp.json(), indent=4))
+        return resp.json()
         
     def delete_entity(self,customName):
         res = client.delete(

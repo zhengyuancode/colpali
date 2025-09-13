@@ -3,6 +3,8 @@ import logging
 import os
 import torch
 from colpali_process import processImg
+from pymilvus import Collection,connections
+from pymilvus.bulk_writer import LocalBulkWriter, BulkFileType
 from colpali_engine.models import ColPali
 from colpali_engine.models.paligemma.colpali.processing_colpali import ColPaliProcessor
 from colpali_engine.utils.torch_utils import get_torch_device,ListDataset
@@ -45,7 +47,7 @@ processor = ColPaliProcessor.from_pretrained(model_name)
 embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
 
 
-def preProcess_milvus(parse_pdf_path: Path,collection_name,pdfId):
+def preProcess_milvus(parse_pdf_path: Path,collection_name,pdfId,writer):
     pages_path = Path(str(parse_pdf_path)+f"/pages")
     caption_text_list_path = Path(str(parse_pdf_path)+f"/caption_text_list.json")
     
@@ -72,12 +74,13 @@ def preProcess_milvus(parse_pdf_path: Path,collection_name,pdfId):
     # 初始化Milvus
     if(client.has_collection(collection_name=collection_name)):
         # logger.info("已存在该向量数据库")
+        print("已存在vidoseek向量数据库")
         retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=client)
     else:
         retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=client)
         retriever.create_collection()
         retriever.create_index()
-        
+        print("已创建vidoseek向量数据库")
     # if(client_img.has_collection(collection_name=username+"_img")):
     #     logger.info("用户已存在向量数据库(纯图像RAG版本)")
     #     retriever_img = MilvusColbertRetriever_img(collection_name=username+"_img", milvus_client=client_img)
@@ -102,7 +105,8 @@ def preProcess_milvus(parse_pdf_path: Path,collection_name,pdfId):
             "customName": pdfId,
             "text_dense": text_dense_value
             }
-        retriever.insert(data)
+        # retriever.insert(data)
+        retriever.bulk_insert_prepare(data,writer)
         
         # data_img = {
         #     "multiple_image_dense": embedding.float().cpu().numpy(),
@@ -112,24 +116,37 @@ def preProcess_milvus(parse_pdf_path: Path,collection_name,pdfId):
         #     "customName": customName
         #     }
         # retriever_img.insert(data_img)
-
+    retriever.bulk_prepare_commit(writer)
     # return {"message": "RAG知识库搭建成功"}
 
 def main():
     collection_name = "vidoseek"
+    #LocalBulkWriter
+    connections.connect(
+        uri="http://127.0.0.1:19530", 
+        token="root:Milvus"
+    )
+
+    collection = Collection(
+        name=collection_name,
+        using="default"
+    )
+
+    schema = collection.schema
+
+    writer = LocalBulkWriter(
+        schema=schema,
+        local_path='./bulkInsert',
+        segment_size=512 * 1024 * 1024, # Default value
+        file_type=BulkFileType.PARQUET
+    )
+    
     with open("/home/gpu/milvus/backend/colpali/ViDoSeek/subfolders.json", 'r', encoding='utf-8') as file:
         subfolders = json.load(file)
-        
-    #TODO：最后一次写入，2025/9/13 2:34 第22份pdf已写入，问题是写入过快或者其他原因导致容器异常
     subfolders_list = subfolders["subfolders"]
     for i in range(len(subfolders_list)):
-        # 手动分批次存入
-        if i <= 21:
-            print(f"跳过第{i+1}份pdf")
-            continue
-        else: 
-            preProcess_milvus(subfolders_list[i]["path"],collection_name,subfolders_list[i]["pdfId"])
-            print(f"写入第{i+1}份pdf")  
+        preProcess_milvus(subfolders_list[i]["path"],collection_name,subfolders_list[i]["pdfId"],writer)
+        print(f"写入第{i+1}份pdf")  
     return
     
 
