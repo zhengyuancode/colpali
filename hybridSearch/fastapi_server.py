@@ -99,20 +99,20 @@ def queryRewrit(queries,language):
         rewriteQuerys.append(response.choices[0].message.content) 
     return rewriteQuerys
 
-def process_query(queries: List[str]) -> List[torch.Tensor]:
+def process_query(queries: List[str],myprocessor,mymodel,mydevice) -> List[torch.Tensor]:
     """处理查询并生成嵌入向量"""
     dataloader = DataLoader(
         dataset=ListDataset[str](queries),
         batch_size=1,
         shuffle=False,
-        collate_fn=lambda x: processor.process_queries(x),
+        collate_fn=lambda x: myprocessor.process_queries(x),
     )
     qs: List[torch.Tensor] = []
     for batch_query in dataloader:
         with torch.no_grad():
-            batch_query = {k: v.to(model.device) for k, v in batch_query.items()}
-            embeddings_query = model(**batch_query)
-        qs.extend(list(torch.unbind(embeddings_query.to(device))))
+            batch_query = {k: v.to(mymodel.device) for k, v in batch_query.items()}
+            embeddings_query = mymodel(**batch_query)
+        qs.extend(list(torch.unbind(embeddings_query.to(mydevice))))
     return qs
 
 
@@ -125,7 +125,7 @@ processor = None
 retriever = None
 device = None
 embeder = None
-image_dir = "./pages"
+image_dir = "/home/gpu/milvus/backend/colpali/pages"
 filepaths = [os.path.join(image_dir, name) for name in os.listdir(image_dir)]
 searching_user=[]
 
@@ -267,7 +267,7 @@ async def get_favicon():
 
 def process_queries(queries: List[str], topk: int) -> Tuple[List[Tensor], List[List[int]], List[List[Tuple]]]:
     #TODO:-------探究这个地方的model为什么没有等待，是因为模型执行的很快吗，各个线程怎么调度的这一个模型---------
-    query_embeddings = process_query(queryRewrit(queries, "english"))
+    query_embeddings = process_query(queryRewrit(queries, "english"),processor,model,device)
     page_numbers_list = []
     search_results_list = []
     
@@ -747,11 +747,16 @@ async def search_all_customName(
 
 
 
-def process_queries_hybrid(username: str ,queries: List[str], customNames: List[str], topk: int,searchMethod:str):
+def process_queries_hybrid(username: str ,queries: List[str], customNames: List[str], topk: int,searchMethod:str,myprocessor,mymodel,mydevice,myembeder,needRewrit = True):
     #TODO:-------探究这个地方的model为什么没有等待，是因为模型执行的很快吗，各个线程怎么调度的这一个模型---------
-    query_embeddings = process_query(queryRewrit(queries, "english"))
+    if needRewrit:   
+        query_embeddings = process_query(queryRewrit(queries, "english"),myprocessor,mymodel,mydevice)
+    else:
+        query_embeddings = process_query(queries,myprocessor,mymodel,mydevice)
+    print("问题预处理完成")
     
-    single_img_qs = model_2.encode_text(texts=queries, task="text-matching")
+    if(not model_2 == None): 
+        single_img_qs = model_2.encode_text(texts=queries, task="text-matching")
     
     search_results_list = []
     
@@ -780,7 +785,7 @@ def process_queries_hybrid(username: str ,queries: List[str], customNames: List[
                 "image_query": query_np,
                 "text_query": queries[0],
                 "customNames": customNames,
-                "text_dense_vector": embeder.getTextEmbeddings(queries[0])
+                "text_dense_vector": myembeder.getTextEmbeddings(queries[0])
             }
             
             #TODO:-------似乎所有的线程都执行在这开始等待retriever空闲出来,探究下这个地方，搞清楚怎么调度的--------
@@ -856,7 +861,7 @@ async def hybridSearch(
             print(f"使用{searchMethod}方法")
             # 调用同步函数，处理第一个 for 循环
             search_results_list = await asyncio.to_thread(
-                process_queries_hybrid, username, queries, customNames, topk,searchMethod
+                process_queries_hybrid, username, queries, customNames, topk,searchMethod,processor,model,device,embeder
             )
             
             async with processing_lock:
@@ -982,7 +987,7 @@ async def hybridSearch(
     )
 
 def checkQA(query,answer,username,customNames,topk,searchMethod):
-    search_results_list = process_queries_hybrid(username,[query],customNames,topk,searchMethod)
+    search_results_list = process_queries_hybrid(username,[query],customNames,topk,searchMethod,processor,model,device,embeder)
     #默认只有一个查询
     search_results = search_results_list[0]
     base64_images=[]
@@ -1073,7 +1078,11 @@ async def hybridSearch_MultiHop(
                             [chain[i]["unsolved_query"]], 
                             customNames, 
                             topk,
-                            searchMethod
+                            searchMethod,
+                            processor,
+                            model,
+                            device,
+                            embeder
                         )
                         for image_path in multi_search_results_list[0]:
                             base64_str = image_to_base64(image_path) 

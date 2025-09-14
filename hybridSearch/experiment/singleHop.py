@@ -1,10 +1,50 @@
 from typing import List
-from fastapi_server import logger,processing_lock,process_queries_hybrid,image_to_base64,AIclient
+from fastapi_server import logger,processing_lock,process_queries_hybrid,image_to_base64,AIclient,processing_requests
+import time
+from colpali_engine.models import ColPali
+from colpali_engine.models.paligemma.colpali.processing_colpali import ColPaliProcessor
+from colpali_engine.utils.torch_utils import get_torch_device,ListDataset
 import asyncio
 import json
+import torch
+from text_embeding import QwenEmbeder
+import os
+import asyncio
+
+
+
+# 获取设备
+device = get_torch_device("cuda")
+logger.info(f"Using device: {device}")
+
+# 模型路径配置
+model_name = "/home/gpu/milvus/backend/colpali/modelcache/models--vidore--colpali-v1.2/snapshots/6b89bc63c16809af4d111bfe412e2ac6bc3c9451"
+cachedir = "/home/gpu/milvus/backend/colpali/modelcache/"
+
+# 加载模型 1
+logger.info(f"Loading model: {model_name}")
+model_load_start = time.time()
+model = ColPali.from_pretrained(
+    model_name,
+    cache_dir=cachedir,
+    torch_dtype=torch.bfloat16,
+    device_map=device,
+    local_files_only=True,
+    use_safetensors=True
+).eval()
+model_load_time = time.time() - model_load_start
+logger.info(f"Model loaded in {model_load_time:.2f} seconds")
+
+# 初始化处理器
+processor = ColPaliProcessor.from_pretrained(model_name)
+embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
+    
+# 创建一个全局锁，用于保护文件读写
+file_lock = asyncio.Lock()
 
 async def hybridSearch(
     queries: List[str],
+    uid: str,
     topk: int,
     searchMethod: str
 ):
@@ -40,9 +80,8 @@ async def hybridSearch(
         print(f"使用{searchMethod}方法")
         # 调用同步函数，处理第一个 for 循环
         search_results_list = await asyncio.to_thread(
-            process_queries_hybrid, collection_name, queries, customNames, topk,searchMethod
+            process_queries_hybrid, collection_name, queries, customNames, topk,searchMethod,processor,model,device,embeder,needRewrit = True
         )
-        
         async with processing_lock:
             processing_requests -= 1
             logger.info(f"待处理请求-1,当前{processing_requests}个")
@@ -74,18 +113,61 @@ async def hybridSearch(
                     }
                     ]
                 )
-                print(response)
             except Exception as e:
                 logger.error(f"调用阿里云 API 失败: {str(e)}")
                 continue
+            
+            # 这里默认queries只有一个query
+            answer = {
+                "uid":uid,
+                "query":queries[j],
+                "answer":response.choices[0].message.content,
+                "pages":search_results
+                }
+            
+            result_file = f"{searchMethod}_results.json"
+            async with file_lock:
+                if os.path.exists(result_file):
+                    with open(result_file, 'r', encoding='utf-8') as f:
+                        result_data = json.load(f)
+                        
+                    result_data["singleHop"].append(answer)
+                    
+                    with open(result_file, 'w', encoding='utf-8') as f:
+                        json.dump(result_data, f, ensure_ascii=False, indent=4)
+                else:
+                    result_data = {"singleHop":[answer]} 
+                    with open(result_file, 'w', encoding='utf-8') as f:
+                        json.dump(result_data, f, ensure_ascii=False, indent=4)
+                      
+            return answer
             
                   
     except Exception as e:
         logger.error(f"Error during search: {str(e)}")
         return
     
-def main():
-    return
+    
+    
+    
+async def main():
+    with open("vidoseek_singleHop.json", 'r', encoding='utf-8') as file:
+        data = json.load(file)
+    examples = data["examples"]
+    
+    # 资源不够时改动下方代码以控制批次
+    queries = []
+    # 已实验i=[0...32]
+    for i in range(len(examples)):
+        if i >= 13 and i <= 32:
+            queries.append({"uid":examples[i]["uid"],"query":examples[i]["query"]})
+    
+    tasks = [
+        hybridSearch([query["query"]],query["uid"],5,"Muti_hybrid_search_img_in_text")
+        for query in queries
+    ]    
+    results = await asyncio.gather(*tasks)
+    return results
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

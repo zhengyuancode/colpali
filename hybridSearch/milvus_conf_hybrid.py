@@ -181,17 +181,26 @@ class MilvusColbertRetriever:
         else:
             return scores
 
-    def Img_search(self, data,customNames, topk,doc_id=[]):
+    def Img_search(self, data,customNames, topk,rerank_topn,doc_id=[]):
         # Perform a vector search on the collection to find the top-k most similar documents.
         # data是一个向量组，这里在进行批量检索
         try: 
             if(doc_id != []):
+                # 构建子集查询条件
+                conditions = []
+                i = 0
+                while(i >= len(customNames)):
+                    condition = f'(customName == {customNames[i]} AND doc_id == {doc_id[i]})'
+                    conditions.append(condition)
+                    i += 1  
+                filter_expr = ' OR '.join(conditions) 
+                   
                 results = self.client.search(
                     self.collection_name,
                     data,
-                    limit=int(topk*1023),
+                    limit=rerank_topn,
                     anns_field="image_dense",
-                    filter=f'customName in {customNames} and doc_id in {doc_id}',
+                    filter=filter_expr,
                     output_fields=["image_dense", "seq_id", "doc_id","customName"],
                     search_params={"metric_type": "IP"}
                 )
@@ -199,7 +208,7 @@ class MilvusColbertRetriever:
                 results = self.client.search(
                     self.collection_name,
                     data,
-                    limit=int(topk*1023),
+                    limit=rerank_topn,
                     anns_field="image_dense",
                     filter=f'customName in {customNames}',
                     output_fields=["image_dense", "seq_id", "doc_id","customName"],
@@ -211,7 +220,6 @@ class MilvusColbertRetriever:
                  
         docs = []
         seen = set()  # 用于跟踪已见的唯一标识
-
         for r_id in range(len(results)):
             for r in range(len(results[r_id])):
                 # 提取文档的唯一标识组合
@@ -226,7 +234,7 @@ class MilvusColbertRetriever:
                         "doc_id": doc_id,
                         "customName": custom_name
                     })
-        scores = []
+        score_results = []
         def rerank_single_doc(doc, data, client, collection_name):
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
             doc_id = doc["doc_id"]
@@ -247,7 +255,8 @@ class MilvusColbertRetriever:
                     break 
             return (score, doc_id, docPath)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
+        print(f"开始计算排序，页面数量：{len(docs)}")
+        with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as executor:
             futures = {
                 executor.submit(
                     rerank_single_doc, doc, data, client, self.collection_name
@@ -256,14 +265,14 @@ class MilvusColbertRetriever:
             }
             for future in concurrent.futures.as_completed(futures):
                 score, doc_id, doc = future.result()
-                scores.append((score, doc_id, doc))
- 
-        scores.sort(key=lambda x: x[0], reverse=True)
+                score_results.append((score, doc_id, doc))
+        print(f"计算结束")
+        score_results.sort(key=lambda x: x[0], reverse=True)
         # return scores
-        if len(scores) >= topk:
-            return scores[:topk]
+        if len(score_results) >= topk:
+            return score_results[:topk]
         else:
-            return scores
+            return score_results
         
         
     def Muti_hybrid_search(self,query_param, topk, rerank_topn=50, weights=(0.4, 0.3, 0.3)):
@@ -300,7 +309,6 @@ class MilvusColbertRetriever:
             }
             request_2 = AnnSearchRequest(**search_param_2)
             
-            request_3 = self.Img_search(query_param["image_query"],customNames,topk)
             
             
             #先混合文本检索
@@ -313,7 +321,10 @@ class MilvusColbertRetriever:
                 limit=topk,
                 output_fields=["doc"]
             )
+            print("文本稠密与稀疏匹配检索结束")
             
+            request_3 = self.Img_search(query_param["image_query"],customNames,topk,rerank_topn)
+            print("图向量组检索结束")
             #将图片特征点匹配结果与前面已混合的文本检索,提取每页图片的存储位置做并集，存入docs_res
             docs_res=[]
             seen = set()  # 用于跟踪已见的唯一标识
@@ -397,7 +408,7 @@ class MilvusColbertRetriever:
         #     request_3 = self.Img_search(query_param["image_query"],customNames,count)
         # else:
         #     request_3 = self.Img_search(query_param["image_query"],customNames,topk*2)
-        request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn)
+        request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn,rerank_topn)
         #先混合文本检索
         RRFranker = RRFRanker(100)
         reqs = [request_1,request_2]
@@ -491,13 +502,20 @@ class MilvusColbertRetriever:
             reqs=reqs,
             ranker=RRFranker,
             limit=rerank_topn,
-            output_fields=["doc","doc_id"]
+            output_fields=["doc_id","customName"]
         )
+
         doc_id=[]
+        sub_customNames = []
         for resItem in res:
             for item in resItem:
+                sub_customNames.append(item["customName"])
                 doc_id.append(item["doc_id"])
-        request_3 = self.Img_search(query_param["image_query"],customNames,topk,doc_id)
+        # 此时的sub_customNames与doc_id在顺序上一一对应
+        if len(sub_customNames) != len(doc_id):
+            print("sub_customNames与doc_id未一一匹配")
+            return []
+        request_3 = self.Img_search(query_param["image_query"],sub_customNames,topk,rerank_topn,doc_id)
         search_output = []
         for sitem in request_3:
             search_output.append(sitem[2])
@@ -518,17 +536,30 @@ class MilvusColbertRetriever:
             topk = count
             rerank_topn =count
         # print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")        
-        request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn)
+        request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn,rerank_topn)
+        
+        doc_id = []
         doc = []
         for sitem in request_3:
+            doc_id.append(sitem[1])
             doc.append(sitem[2])
+        
+        # 构建子集查询条件
+        conditions = []
+        i = 0
+        while(i >= len(doc)):
+            condition = f'(doc == {doc[i]} AND doc_id == {doc_id[i]})'
+            conditions.append(condition)
+            i += 1  
+        filter_expr = ' OR '.join(conditions)  
+            
         
         # text semantic search (dense)
         search_param_1 = {
             "data": [query_param["text_dense_vector"]],
             "anns_field": "text_dense",
             "param": {"nprobe": 10},
-            "expr": f"seq_id == 0 and customName in {customNames} and doc in {doc}",
+            "expr": filter_expr,
             "limit": topk
         }
         request_1 = AnnSearchRequest(**search_param_1)
@@ -538,7 +569,7 @@ class MilvusColbertRetriever:
             "data": [query_param["text_query"]],
             "anns_field": "text_sparse",
             "param": {"drop_ratio_search": 0.2},
-            "expr": f"seq_id == 0 and customName in {customNames} and doc in {doc}",
+            "expr": filter_expr,
             "limit": topk
         }
         request_2 = AnnSearchRequest(**search_param_2)
