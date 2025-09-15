@@ -1,15 +1,15 @@
 from typing import List
-from fastapi_server import logger,processing_lock,process_queries_hybrid,image_to_base64,AIclient,processing_requests
+from fastapi_server import logger,processing_lock,process_queries_hybrid,image_to_base64,AIclient
 import time
 from colpali_engine.models import ColPali
 from colpali_engine.models.paligemma.colpali.processing_colpali import ColPaliProcessor
-from colpali_engine.utils.torch_utils import get_torch_device,ListDataset
+from colpali_engine.utils.torch_utils import get_torch_device
 import asyncio
 import json
 import torch
 from text_embeding import QwenEmbeder
 import os
-import asyncio
+
 
 
 
@@ -70,11 +70,7 @@ async def hybridSearch(
             logger.warning("非法的检索方法")
             return
         
-        global processing_requests 
-            # 使用锁确保修改 processing_requests 是原子的
-        async with processing_lock:
-            processing_requests += 1
-            logger.info(f"待处理检索+1,当前{processing_requests}个")
+
         
         logger.info(f"使用{searchMethod}方法")
         print(f"使用{searchMethod}方法")
@@ -82,10 +78,7 @@ async def hybridSearch(
         search_results_list = await asyncio.to_thread(
             process_queries_hybrid, collection_name, queries, customNames, topk,searchMethod,processor,model,device,embeder,needRewrit = True
         )
-        async with processing_lock:
-            processing_requests -= 1
-            logger.info(f"待处理请求-1,当前{processing_requests}个")
-        
+
         for j in range(len(search_results_list)):
             search_results = search_results_list[j]
                                         
@@ -104,7 +97,7 @@ async def hybridSearch(
                 
             try:
                 response  = AIclient.chat.completions.create(
-                    model="qwen-vl-max-2025-08-13", 
+                    model="qwen-vl-max-latest", 
                     messages=[
                     {"role":"system","content":[{"type": "text", "text": "You need to combine the image information provided by the user's document page with your own knowledge base to answer the user's query. Your answer should be in English.Your answer needs to be as concise as possible."}]},
                     {
@@ -150,22 +143,48 @@ async def hybridSearch(
     
     
     
-async def main():
-    with open("vidoseek_singleHop.json", 'r', encoding='utf-8') as file:
-        data = json.load(file)
-    examples = data["examples"]
-    
+async def main():    
     # 资源不够时改动下方代码以控制批次
     queries = []
-    # 已实验i=[0...32]
-    for i in range(len(examples)):
-        if i >= 13 and i <= 32:
-            queries.append({"uid":examples[i]["uid"],"query":examples[i]["query"]})
+    # problem_dataset = {"examples":[]}
+            
+    with open("vidoseek_singleHop.json", 'r', encoding='utf-8') as file:
+        dataset = json.load(file)
+    with open("Muti_hybrid_search_img_in_text_results.json", 'r', encoding='utf-8') as file:
+        results = json.load(file)
+    for data in dataset["examples"]:
+        needreasoning = True
+        uid = data["uid"]
+        for result in results["singleHop"]:
+            if result["uid"] == uid:
+                needreasoning = False
+                break
+        if needreasoning:
+            queries.append({"uid":data["uid"], "query": data["query"]})
+            # problem_dataset["examples"].append(data) 
+            
+    # with open("problem_dataset.json", 'w', encoding='utf-8') as f:
+    #     json.dump(problem_dataset, f, ensure_ascii=False, indent=4)
     
-    tasks = [
-        hybridSearch([query["query"]],query["uid"],5,"Muti_hybrid_search_img_in_text")
-        for query in queries
-    ]    
+    if len(queries) + len(results["singleHop"]) != len(dataset["examples"]):
+        print(f"未实验数据列表构建失败")
+        return
+    print(len(queries))
+    print(len(results["singleHop"]))
+    print(len(dataset["examples"]))
+    # 创建信号量，限制最大并发数为 10
+    semaphore = asyncio.Semaphore(10)
+
+    async def run_with_semaphore(query):
+        async with semaphore:
+            return await hybridSearch(
+                [query["query"]],
+                query["uid"],
+                5,
+                "Muti_hybrid_search_img_in_text"
+            )
+    
+    tasks = [run_with_semaphore(query) for query in queries]  
     results = await asyncio.gather(*tasks)
     return results
 
