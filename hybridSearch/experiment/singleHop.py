@@ -9,6 +9,8 @@ import json
 import torch
 from text_embeding import QwenEmbeder
 import os
+from transformers import pipeline
+from transformers import AutoModel
 
 
 
@@ -19,6 +21,7 @@ logger.info(f"Using device: {device}")
 
 # 模型路径配置
 model_name = "/home/gpu/milvus/backend/colpali/modelcache/models--vidore--colpali-v1.2/snapshots/6b89bc63c16809af4d111bfe412e2ac6bc3c9451"
+model_name_2 = "/home/gpu/milvus/backend/colpali/modelcache/models--jinaai--jina-embeddings-v4/snapshots/50cb06ee0b17a7257c8caf4417c2a7596eb7e5d2"
 cachedir = "/home/gpu/milvus/backend/colpali/modelcache/"
 
 # 加载模型 1
@@ -32,6 +35,16 @@ model = ColPali.from_pretrained(
     local_files_only=True,
     use_safetensors=True
 ).eval()
+
+model_2 = None
+# model_2 = AutoModel.from_pretrained(
+#         model_name_2,
+#         trust_remote_code=True,
+#         torch_dtype=torch.float16,
+#         cache_dir=cachedir,                # 指定缓存路径
+#         local_files_only=True,              # 强制离线加载
+#     )
+# model_2.to("cuda")
 model_load_time = time.time() - model_load_start
 logger.info(f"Model loaded in {model_load_time:.2f} seconds")
 
@@ -39,8 +52,6 @@ logger.info(f"Model loaded in {model_load_time:.2f} seconds")
 processor = ColPaliProcessor.from_pretrained(model_name)
 embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
     
-# 创建一个全局锁，用于保护文件读写
-file_lock = asyncio.Lock()
 
 async def hybridSearch(
     queries: List[str],
@@ -66,7 +77,7 @@ async def hybridSearch(
         customNames.append(pdf["pdfId"])
     
     try:
-        if(searchMethod not in ["Muti_hybrid_search","Muti_hybrid_search_intersection","Muti_hybrid_search_img_in_text","Muti_hybrid_search_text_in_img","Muti_hybrid_search_multiple_in_single","Muti_hybrid_search_single_in_multiple"]):
+        if(searchMethod not in ["Muti_hybrid_search","Muti_hybrid_search_intersection","Muti_hybrid_search_img_in_text","Muti_hybrid_search_text_in_img","Muti_vector_Img_search","Muti_hybrid_search_multiple_in_single","Muti_hybrid_search_single_in_multiple"]):
             logger.warning("非法的检索方法")
             return
         
@@ -75,9 +86,14 @@ async def hybridSearch(
         logger.info(f"使用{searchMethod}方法")
         print(f"使用{searchMethod}方法")
         # 调用同步函数，处理第一个 for 循环
-        search_results_list = await asyncio.to_thread(
-            process_queries_hybrid, collection_name, queries, customNames, topk,searchMethod,processor,model,device,embeder,needRewrit = True
-        )
+        if(searchMethod in ["Muti_hybrid_search_single_in_multiple","Muti_hybrid_search_multiple_in_single"]):
+            search_results_list = await asyncio.to_thread(
+                process_queries_hybrid, collection_name, queries, customNames, topk,searchMethod,processor,model,model_2,device,embeder,needRewrit = False
+            )
+        else:
+            search_results_list = await asyncio.to_thread(
+                process_queries_hybrid, collection_name, queries, customNames, topk,searchMethod,processor,model,None,device,embeder,needRewrit = False
+            )
 
         for j in range(len(search_results_list)):
             search_results = search_results_list[j]
@@ -118,61 +134,31 @@ async def hybridSearch(
                 "pages":search_results
                 }
             
-            result_file = f"{searchMethod}_results.json"
-            async with file_lock:
-                if os.path.exists(result_file):
-                    with open(result_file, 'r', encoding='utf-8') as f:
-                        result_data = json.load(f)
-                        
-                    result_data["singleHop"].append(answer)
-                    
-                    with open(result_file, 'w', encoding='utf-8') as f:
-                        json.dump(result_data, f, ensure_ascii=False, indent=4)
-                else:
-                    result_data = {"singleHop":[answer]} 
-                    with open(result_file, 'w', encoding='utf-8') as f:
-                        json.dump(result_data, f, ensure_ascii=False, indent=4)
+            # async with result_lock:
+            #         result_data["singleHop"].append(answer)
                       
             return answer
             
                   
     except Exception as e:
         logger.error(f"Error during search: {str(e)}")
-        return
-    
-    
+        return   
     
     
 async def main():    
-    # 资源不够时改动下方代码以控制批次
+    
     queries = []
-    # problem_dataset = {"examples":[]}
-            
+    searchMethod = "Muti_vector_Img_search"
+    
+    # 资源不够时改动下方代码以控制批次
     with open("vidoseek_singleHop.json", 'r', encoding='utf-8') as file:
         dataset = json.load(file)
-    with open("Muti_hybrid_search_img_in_text_results.json", 'r', encoding='utf-8') as file:
-        results = json.load(file)
-    for data in dataset["examples"]:
-        needreasoning = True
-        uid = data["uid"]
-        for result in results["singleHop"]:
-            if result["uid"] == uid:
-                needreasoning = False
-                break
-        if needreasoning:
+        
+    for i in range(len(dataset["examples"])): 
+            data = dataset["examples"][i]
             queries.append({"uid":data["uid"], "query": data["query"]})
-            # problem_dataset["examples"].append(data) 
-            
-    # with open("problem_dataset.json", 'w', encoding='utf-8') as f:
-    #     json.dump(problem_dataset, f, ensure_ascii=False, indent=4)
     
-    if len(queries) + len(results["singleHop"]) != len(dataset["examples"]):
-        print(f"未实验数据列表构建失败")
-        return
-    print(len(queries))
-    print(len(results["singleHop"]))
-    print(len(dataset["examples"]))
-    # 创建信号量，限制最大并发数为 10
+    # 创建信号量，限制最大并发数
     semaphore = asyncio.Semaphore(10)
 
     async def run_with_semaphore(query):
@@ -181,11 +167,25 @@ async def main():
                 [query["query"]],
                 query["uid"],
                 5,
-                "Muti_hybrid_search_img_in_text"
+                searchMethod
             )
     
     tasks = [run_with_semaphore(query) for query in queries]  
     results = await asyncio.gather(*tasks)
+    result_file = f"{searchMethod}_results.json"   
+    result_data = None 
+    
+    if os.path.exists(result_file):
+        with open(result_file, 'r', encoding='utf-8') as f:
+            result_data = json.load(f)
+        result_data["singleHop"] = result_data["singleHop"] + results
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=4) 
+    else:
+        result_data = {"singleHop":results} 
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=4) 
+    
     return results
 
 if __name__ == "__main__":

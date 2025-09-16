@@ -747,16 +747,15 @@ async def search_all_customName(
 
 
 
-def process_queries_hybrid(username: str ,queries: List[str], customNames: List[str], topk: int,searchMethod:str,myprocessor,mymodel,mydevice,myembeder,needRewrit = True):
+def process_queries_hybrid(username: str ,queries: List[str], customNames: List[str], topk: int,searchMethod:str,myprocessor,mymodel,mymodel2 = None,mydevice = None,myembeder = None,needRewrit = True):
     #TODO:-------探究这个地方的model为什么没有等待，是因为模型执行的很快吗，各个线程怎么调度的这一个模型---------
     if needRewrit:   
         query_embeddings = process_query(queryRewrit(queries, "english"),myprocessor,mymodel,mydevice)
     else:
         query_embeddings = process_query(queries,myprocessor,mymodel,mydevice)
-    print("问题预处理完成")
     
-    if(not model_2 == None): 
-        single_img_qs = model_2.encode_text(texts=queries, task="text-matching")
+    if(not mymodel2 == None): 
+        single_img_qs = mymodel2.encode_text(texts=queries, task="text-matching")
     
     search_results_list = []
     
@@ -799,6 +798,11 @@ def process_queries_hybrid(username: str ,queries: List[str], customNames: List[
                 search_results = hybrid_retriever.Muti_hybrid_search_img_in_text(query_params,topk)
             elif(searchMethod == "Muti_hybrid_search_text_in_img"):
                 search_results = hybrid_retriever.Muti_hybrid_search_text_in_img(query_params,topk)
+            elif(searchMethod == "Muti_vector_Img_search"):
+                score_results = hybrid_retriever.Img_search(query_params["image_query"],query_params["customNames"],topk)
+                search_results = []
+                for sitem in score_results:
+                    search_results.append(sitem[2])  
             else:
                 logger.error("searchMethod出错")
             search_results_list.append(search_results)
@@ -861,7 +865,7 @@ async def hybridSearch(
             print(f"使用{searchMethod}方法")
             # 调用同步函数，处理第一个 for 循环
             search_results_list = await asyncio.to_thread(
-                process_queries_hybrid, username, queries, customNames, topk,searchMethod,processor,model,device,embeder
+                process_queries_hybrid, username, queries, customNames, topk,searchMethod,processor,model,model_2,device,embeder
             )
             
             async with processing_lock:
@@ -987,7 +991,7 @@ async def hybridSearch(
     )
 
 def checkQA(query,answer,username,customNames,topk,searchMethod):
-    search_results_list = process_queries_hybrid(username,[query],customNames,topk,searchMethod,processor,model,device,embeder)
+    search_results_list = process_queries_hybrid(username,[query],customNames,topk,searchMethod,processor,model,model_2,device,embeder)
     #默认只有一个查询
     search_results = search_results_list[0]
     base64_images=[]
@@ -1081,6 +1085,7 @@ async def hybridSearch_MultiHop(
                             searchMethod,
                             processor,
                             model,
+                            model_2,
                             device,
                             embeder
                         )

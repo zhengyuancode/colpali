@@ -181,9 +181,22 @@ class MilvusColbertRetriever:
         else:
             return scores
 
-    def Img_search(self, data,customNames, topk,rerank_topn,doc_id=[]):
+    def Img_search(self, data,customNames, topk,rerank_topn = None,doc_id=[]):
         # Perform a vector search on the collection to find the top-k most similar documents.
         # data是一个向量组，这里在进行批量检索
+        if rerank_topn == None:
+            rerank_topn = 50
+            count = self.count_entity_customNames(customNames)
+            if(count >= rerank_topn*2):
+                rerank_topn = rerank_topn
+            elif(count < rerank_topn*2 and count > topk*2):
+                rerank_topn = count//2
+            elif(count < topk*2 and count >= topk):
+                rerank_topn = topk
+            else:
+                topk = count
+                rerank_topn =count
+                
         try: 
             if(doc_id != []):
                 # 构建子集查询条件
@@ -255,7 +268,6 @@ class MilvusColbertRetriever:
                     break 
             return (score, doc_id, docPath)
 
-        print(f"开始计算排序，页面数量：{len(docs)}")
         with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as executor:
             futures = {
                 executor.submit(
@@ -266,7 +278,6 @@ class MilvusColbertRetriever:
             for future in concurrent.futures.as_completed(futures):
                 score, doc_id, doc = future.result()
                 score_results.append((score, doc_id, doc))
-        print(f"计算结束")
         score_results.sort(key=lambda x: x[0], reverse=True)
         # return scores
         if len(score_results) >= topk:
@@ -321,10 +332,8 @@ class MilvusColbertRetriever:
                 limit=topk,
                 output_fields=["doc"]
             )
-            print("文本稠密与稀疏匹配检索结束")
             
             request_3 = self.Img_search(query_param["image_query"],customNames,topk,rerank_topn)
-            print("图向量组检索结束")
             #将图片特征点匹配结果与前面已混合的文本检索,提取每页图片的存储位置做并集，存入docs_res
             docs_res=[]
             seen = set()  # 用于跟踪已见的唯一标识

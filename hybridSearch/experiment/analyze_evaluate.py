@@ -93,14 +93,14 @@ def evaluate(dataset_path,answer_path):
     for i in tqdm(range(len(answer["singleHop"])), desc="Evaluating examples"):
         if "eval_score" in answer["singleHop"][i]:
             continue
-        if answer["singleHop"][i]["query"] != sub_dataset["examples"][i-280]["query"]:
+        if answer["singleHop"][i]["query"] != sub_dataset["examples"][i]["query"]:
             print("评估数据错误")
             return
-        if answer["singleHop"][i]["uid"] != sub_dataset["examples"][i-280]["uid"]:
+        if answer["singleHop"][i]["uid"] != sub_dataset["examples"][i]["uid"]:
             print("评估数据错误")
             return
         query = answer["singleHop"][i]["query"]
-        reference_answer = sub_dataset["examples"][i-280]["reference_answer"]
+        reference_answer = sub_dataset["examples"][i]["reference_answer"]
         generated_answer = answer["singleHop"][i]["answer"]
         score = llm_generate(query,reference_answer,generated_answer)
         if score == "1" or score == "2" or score == "3" or score == "4" or score == "5":
@@ -119,7 +119,7 @@ def evaluate(dataset_path,answer_path):
         else:
             print("LLM回答格式有误")
     
-    accuracy = round(acc / len(scores),2)
+    accuracy = round(acc / len(scores),3)
     answer["eval_results"]={
         "total": len(scores),
         "acc": acc,
@@ -130,7 +130,7 @@ def evaluate(dataset_path,answer_path):
     print(f"评估完成，在{answer_path}查看结果")
     
 def main():
-    evaluate("vidoseek_singleHop.json","Muti_hybrid_search_img_in_text_results.json")
+    evaluate("vidoseek_singleHop.json","Muti_vector_Img_search_results.json")
 
 if __name__ == "__main__":
     main()

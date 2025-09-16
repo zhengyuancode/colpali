@@ -13,6 +13,7 @@ from milvus_conf_hybrid import MilvusColbertRetriever, client
 from fastapi_server import getTextByPath
 from text_embeding import QwenEmbeder
 import json
+from transformers import AutoModel
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -26,6 +27,7 @@ logger.info(f"Using device: {device}")
 
 # 模型路径配置
 model_name = "/home/gpu/milvus/backend/colpali/modelcache/models--vidore--colpali-v1.2/snapshots/6b89bc63c16809af4d111bfe412e2ac6bc3c9451"
+model_name_2 = "/home/gpu/milvus/backend/colpali/modelcache/models--jinaai--jina-embeddings-v4/snapshots/50cb06ee0b17a7257c8caf4417c2a7596eb7e5d2"
 cachedir = "/home/gpu/milvus/backend/colpali/modelcache/"
 
 # 加载模型
@@ -39,6 +41,15 @@ model = ColPali.from_pretrained(
     local_files_only=True,
     use_safetensors=True
 ).eval()
+
+model_2 = AutoModel.from_pretrained(
+        model_name_2,
+        trust_remote_code=True,
+        torch_dtype=torch.float16,
+        cache_dir=cachedir,                # 指定缓存路径
+        local_files_only=True,              # 强制离线加载
+    )
+model_2.to("cuda")
 model_load_time = time.time() - model_load_start
 logger.info(f"Model loaded in {model_load_time:.2f} seconds")
 
@@ -120,7 +131,7 @@ def preProcess_milvus(parse_pdf_path: Path,collection_name,pdfId,writer):
     # return {"message": "RAG知识库搭建成功"}
 
 def main():
-    collection_name = "vidoseek"
+    collection_name = "vidoseek_img"
     #LocalBulkWriter
     connections.connect(
         uri="http://127.0.0.1:19530", 
