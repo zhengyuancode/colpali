@@ -2,14 +2,15 @@ from pathlib import Path
 import logging
 import os
 import torch
-from colpali_process import processImg
+from colpali_process import processImg,processImg_single
 from pymilvus import Collection,connections
-from pymilvus.bulk_writer import LocalBulkWriter, BulkFileType
+from pymilvus.bulk_writer import LocalBulkWriter, BulkFileType,RemoteBulkWriter
 from colpali_engine.models import ColPali
 from colpali_engine.models.paligemma.colpali.processing_colpali import ColPaliProcessor
 from colpali_engine.utils.torch_utils import get_torch_device,ListDataset
 import time
 from milvus_conf_hybrid import MilvusColbertRetriever, client
+from milvus_conf_img_hybrid import MilvusColbertRetriever as MilvusColbertRetriever_img,client as client_img
 from fastapi_server import getTextByPath
 from text_embeding import QwenEmbeder
 import json
@@ -60,7 +61,7 @@ embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
 
 def preProcess_milvus(parse_pdf_path: Path,collection_name,pdfId,writer):
     pages_path = Path(str(parse_pdf_path)+f"/pages")
-    caption_text_list_path = Path(str(parse_pdf_path)+f"/caption_text_list.json")
+    # caption_text_list_path = Path(str(parse_pdf_path)+f"/caption_text_list.json")
     
     # if not parse_pdf_path.exists():
     #     logger.info("不存在文档解析处理结果")
@@ -80,54 +81,55 @@ def preProcess_milvus(parse_pdf_path: Path,collection_name,pdfId,writer):
     #获取图片向量组
     logger.info("获取图片向量组和单向量...")
     ds = processImg(ImagePaths,model,processor,device)
-    # single_img_vecs = processImg_single(ImagePaths,model_2)
+    single_img_vecs = processImg_single(ImagePaths,model_2)
     
     # 初始化Milvus
-    if(client.has_collection(collection_name=collection_name)):
-        # logger.info("已存在该向量数据库")
-        print("已存在vidoseek向量数据库")
-        retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=client)
-    else:
-        retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=client)
-        retriever.create_collection()
-        retriever.create_index()
-        print("已创建vidoseek向量数据库")
-    # if(client_img.has_collection(collection_name=username+"_img")):
-    #     logger.info("用户已存在向量数据库(纯图像RAG版本)")
-    #     retriever_img = MilvusColbertRetriever_img(collection_name=username+"_img", milvus_client=client_img)
+    # if(client.has_collection(collection_name=collection_name)):
+    #     # logger.info("已存在该向量数据库")
+    #     print("已存在vidoseek向量数据库")
+    #     retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=client)
     # else:
-    #     retriever_img = MilvusColbertRetriever_img(collection_name=username+"_img", milvus_client=client_img)
-    #     retriever_img.create_collection()
-    #     retriever_img.create_index()
+    #     retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=client)
+    #     retriever.create_collection()
+    #     retriever.create_index()
+    #     print("已创建vidoseek向量数据库")
+    if(client_img.has_collection(collection_name=collection_name)):
+        logger.info("用户已存在向量数据库(纯图像RAG版本)")
+        retriever_img = MilvusColbertRetriever_img(collection_name=collection_name, milvus_client=client_img)
+    else:
+        retriever_img = MilvusColbertRetriever_img(collection_name=collection_name, milvus_client=client_img)
+        retriever_img.create_collection()
+        retriever_img.create_index()
     
     # logger.info("开始写入向量数据库...")    
-    for i, (Imgpath, embedding) in enumerate(zip(ImagePaths, ds)):
-        text = getTextByPath(Imgpath,caption_text_list_path)
-        # 判断 text 是否为空（None 或空字符串）
-        if text is None or text.strip() == "":
-            text_dense_value = [0.0] * 1024
-        else:
-            text_dense_value = embeder.getTextEmbeddings(text)
-        data = {
-            "colbert_vecs": embedding.float().cpu().numpy(),
-            "doc_id": i,
-            "filepath": Imgpath,
-            "text": text,
-            "customName": pdfId,
-            "text_dense": text_dense_value
-            }
-        # retriever.insert(data)
-        retriever.bulk_insert_prepare(data,writer)
-        
-        # data_img = {
-        #     "multiple_image_dense": embedding.float().cpu().numpy(),
+    for i, (Imgpath, embedding,single_img_embedding) in enumerate(zip(ImagePaths, ds,single_img_vecs)):
+        # text = getTextByPath(Imgpath,caption_text_list_path)
+        # # 判断 text 是否为空（None 或空字符串）
+        # if text is None or text.strip() == "":
+        #     text_dense_value = [0.0] * 1024
+        # else:
+        #     text_dense_value = embeder.getTextEmbeddings(text)
+        # data = {
+        #     "colbert_vecs": embedding.float().cpu().numpy(),
         #     "doc_id": i,
         #     "filepath": Imgpath,
-        #     "single_image_dense":single_img_embedding[0],
-        #     "customName": customName
+        #     "text": text,
+        #     "customName": pdfId,
+        #     "text_dense": text_dense_value
         #     }
+        # retriever.insert(data)
+        # retriever.bulk_insert_prepare(data,writer)   
+        data_img = {
+            "multiple_image_dense": embedding.float().cpu().numpy(),
+            "doc_id": i,
+            "filepath": Imgpath,
+            "single_image_dense":single_img_embedding.float().cpu().numpy(),
+            "customName": pdfId
+            }
         # retriever_img.insert(data_img)
-    retriever.bulk_prepare_commit(writer)
+        retriever_img.bulk_insert_prepare(data_img,writer)
+    retriever_img.bulk_prepare_commit(writer)  
+    
     # return {"message": "RAG知识库搭建成功"}
 
 def main():
@@ -144,13 +146,32 @@ def main():
     )
 
     schema = collection.schema
+    
+    ACCESS_KEY="minioadmin"
+    SECRET_KEY="minioadmin"
+    BUCKET_NAME="a-bucket"
+    
+    conn = RemoteBulkWriter.S3ConnectParam(
+        endpoint="localhost:9000", # the default MinIO service started along with Milvus
+        access_key=ACCESS_KEY,
+        secret_key=SECRET_KEY,
+        bucket_name=BUCKET_NAME,
+        secure=False
+    )
 
-    writer = LocalBulkWriter(
+    # writer = LocalBulkWriter(
+    #     schema=schema,
+    #     local_path='./bulkInsert',
+    #     segment_size=512 * 1024 * 1024, # Default value
+    #     file_type=BulkFileType.PARQUET
+    # )
+    writer = RemoteBulkWriter(
         schema=schema,
-        local_path='./bulkInsert',
-        segment_size=512 * 1024 * 1024, # Default value
+        remote_path="/vidoseek_img",
+        connect_param=conn,
         file_type=BulkFileType.PARQUET
     )
+
     
     with open("/home/gpu/milvus/backend/colpali/ViDoSeek/subfolders.json", 'r', encoding='utf-8') as file:
         subfolders = json.load(file)

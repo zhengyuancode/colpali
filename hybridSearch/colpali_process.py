@@ -100,14 +100,11 @@ def processImg(filepaths: List[str],Mymodel,Myprocessor,Mydevice):
     return ds
 
 def processImg_single(filepaths: List[str],Mymodel):
-    single_img_vec=[]
-    for path in filepaths:
-        image_embeddings = Mymodel.encode_image(
-                images=[path],
-                task="retrieval"
-            )
-        single_img_vec.append(image_embeddings)
-    return single_img_vec
+    image_embeddings = Mymodel.encode_image(
+            images=filepaths,
+            task="retrieval"
+        )
+    return image_embeddings
 
 def getTextByPath(filepath: str) -> str:
     try:

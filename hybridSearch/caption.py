@@ -3,6 +3,7 @@ import json
 import base64
 from tqdm import tqdm
 import os
+from transformers import pipeline
 # from transformers import pipeline
 
 # QWENAPIKEY="sk-f78b07615c8a45128d760579e6d42e1f"
@@ -142,14 +143,14 @@ def getTextList(block_path,language,image_dir,output_path,client):
         page_idx = item["page_idx"]
 
         if item["type"] == "text":
-            textList[page_idx] += item["text"]
+            textList[page_idx] += item["text"] + " "
             
         elif item["type"] == "image":
             img_path=image_dir + item["img_path"]
             caption = ""
             if img_path and os.path.isfile(img_path):
                 caption += getCaption(image_dir + item["img_path"], language,client)
-            textList[page_idx] += caption if caption is not None else ""
+            textList[page_idx] += (caption+ " ") if caption is not None else " "
             
         elif item["type"] == "table":
             img_path=image_dir + item["img_path"]
@@ -158,7 +159,7 @@ def getTextList(block_path,language,image_dir,output_path,client):
                 caption += getCaption(image_dir + item["img_path"], language,client)
             if (str(item["table_caption"]) != "[]"):
                 caption += str(item["table_caption"])
-            textList[page_idx] += caption if caption is not None else ""
+            textList[page_idx] += (caption+ " ") if caption is not None else " "
             
         elif item["type"] == "equation":
             img_path=image_dir + item["img_path"]
@@ -166,7 +167,7 @@ def getTextList(block_path,language,image_dir,output_path,client):
             if img_path and os.path.isfile(img_path):
                 caption += getCaption(image_dir + item["img_path"], language,client)
             caption += item["text"]
-            textList[page_idx] += caption if caption is not None else ""    
+            textList[page_idx] += (caption+ " ") if caption is not None else " "    
             
         else:
             print(item)
@@ -180,5 +181,23 @@ if __name__ == "__main__":
     # language="english"
     # block_path="hybridSearch\\66b6191f-78ac-4132-b182-3f490cf1b63a_content_list.json"
     # getTextList(block_path,language)
-   
-    print("")
+    QWENAPIKEY="sk-f78b07615c8a45128d760579e6d42e1f"
+    AIclient = OpenAI(
+        # 若没有配置环境变量，请用百炼API Key将下行替换为：api_key="sk-xxx",
+        api_key=QWENAPIKEY,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    
+    img_captioner = pipeline(
+        task="image-to-text",
+        model="/root/autodl-tmp/cpdfr-data/modelcache/huggingface/hub/models--Salesforce--blip-image-captioning-large/snapshots/353689b859fcf0523410b1806dace5fb46ecdf41"
+    )
+
+    
+    image_path = "/root/autodl-tmp/cpdfr-data/cpdfr/hybridSearch/experment_vidore/vidore_data/docvqa_test_subsampled/documents/parse/vidore_docvqa/auto/images/0b7c402e0e2d1e773b84898fffbf9d3eb9ac6454f1ae8fa6dac754f2b2f47ced.jpg"
+    
+    # 特点：对图片做详细描述，但损失速度
+    print(getCaption(image_path,"english",AIclient))
+    print("#---------------------------------------")
+    # 特点：仅对图片做简单描述，但损失图片内部细节，适合图形，图像描述，而不是图表及其内部数据的描述
+    print(getCaption_local(image_path,img_captioner))

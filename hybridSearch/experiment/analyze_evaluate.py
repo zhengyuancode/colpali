@@ -66,7 +66,6 @@ def evaluate(dataset_path,answer_path):
         dataset = json.load(file)
     with open(answer_path, 'r', encoding='utf-8') as file:
         answer = json.load(file)
-        
     # old_scores = []
     # for ans in answer["singleHop"]:
     #     if "eval_score" in ans:
@@ -75,14 +74,18 @@ def evaluate(dataset_path,answer_path):
     #     print("旧分数统计失败")
     #     return
     sub_dataset={"examples":[]}
+    null_count = 0
     for item in answer["singleHop"]:
+        if not item:
+            null_count += 1
+            continue
         uid = item["uid"]
         for data in dataset["examples"]:
             if (data["uid"] == uid) and not ("eval_score" in item):
                 sub_dataset["examples"].append(data)
                 break
     
-    if(len(sub_dataset["examples"]) != len(answer["singleHop"])):
+    if(len(sub_dataset["examples"]) != len(answer["singleHop"]) - null_count):
         print("评估数据错误")
         return
     # if(len(sub_dataset["examples"]) != 355):
@@ -90,17 +93,21 @@ def evaluate(dataset_path,answer_path):
     #     return
     
     scores = []
+    j = 0
     for i in tqdm(range(len(answer["singleHop"])), desc="Evaluating examples"):
+        if not answer["singleHop"][i]:
+            i += 1
+            continue
         if "eval_score" in answer["singleHop"][i]:
             continue
-        if answer["singleHop"][i]["query"] != sub_dataset["examples"][i]["query"]:
+        if answer["singleHop"][i]["query"] != sub_dataset["examples"][j]["query"]:
             print("评估数据错误")
             return
-        if answer["singleHop"][i]["uid"] != sub_dataset["examples"][i]["uid"]:
+        if answer["singleHop"][i]["uid"] != sub_dataset["examples"][j]["uid"]:
             print("评估数据错误")
             return
         query = answer["singleHop"][i]["query"]
-        reference_answer = sub_dataset["examples"][i]["reference_answer"]
+        reference_answer = sub_dataset["examples"][j]["reference_answer"]
         generated_answer = answer["singleHop"][i]["answer"]
         score = llm_generate(query,reference_answer,generated_answer)
         if score == "1" or score == "2" or score == "3" or score == "4" or score == "5":
@@ -109,6 +116,7 @@ def evaluate(dataset_path,answer_path):
         else:
             print("LLM回答格式有误")
             return 
+        j += 1
         
     acc = 0
     for s in scores:
@@ -130,7 +138,7 @@ def evaluate(dataset_path,answer_path):
     print(f"评估完成，在{answer_path}查看结果")
     
 def main():
-    evaluate("vidoseek_singleHop.json","Muti_vector_Img_search_results.json")
+    evaluate("vidoseek_singleHop.json","Muti_hybrid_search_multiple_in_single_results.json")
 
 if __name__ == "__main__":
     main()

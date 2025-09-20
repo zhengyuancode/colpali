@@ -125,7 +125,7 @@ processor = None
 retriever = None
 device = None
 embeder = None
-image_dir = "/home/gpu/milvus/backend/colpali/pages"
+image_dir = "/root/autodl-tmp/cpdfr-data/cpdfr/hybridSearch/pages"
 filepaths = [os.path.join(image_dir, name) for name in os.listdir(image_dir)]
 searching_user=[]
 
@@ -178,9 +178,9 @@ def initialize_service():
     embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
     
     img_captioner = pipeline(
-    task="image-to-text",
-    model="/home/gpu/milvus/backend/colpali/modelcache/models--Salesforce--blip-image-captioning-large/snapshots/353689b859fcf0523410b1806dace5fb46ecdf41"
-)
+        task="image-to-text",
+        model="/home/gpu/milvus/backend/colpali/modelcache/models--Salesforce--blip-image-captioning-large/snapshots/353689b859fcf0523410b1806dace5fb46ecdf41"
+    )
     
     # 初始化Milvus检索器
     logger.info("Initializing Milvus retriever...")
@@ -647,7 +647,7 @@ async def pre_process_rag(
             "multiple_image_dense": embedding.float().cpu().numpy(),
             "doc_id": i,
             "filepath": Imgpath,
-            "single_image_dense":single_img_embedding[0],
+            "single_image_dense":single_img_embedding.float().cpu().numpy(),
             "customName": customName
             }
         retriever_img.insert(data_img)

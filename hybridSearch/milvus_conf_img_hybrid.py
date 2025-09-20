@@ -1,4 +1,5 @@
 from pymilvus import MilvusClient, DataType, Function, FunctionType
+from pymilvus.bulk_writer import bulk_import,get_import_progress
 import numpy as np
 import concurrent.futures
 from pymilvus import AnnSearchRequest
@@ -6,7 +7,11 @@ from pymilvus import RRFRanker
 import torch
 from reranker import text_rerank
 import json
+from minio import Minio
+from minio.error import S3Error
+import os
 
+uri = "http://127.0.0.1:19530"
 client = MilvusClient(uri="http://127.0.0.1:19530")
 
 class MilvusColbertRetriever:
@@ -84,20 +89,38 @@ class MilvusColbertRetriever:
         )
 
 
-    def Img_search(self, data,customNames, topk,doc_id=[]):
+    def Img_search(self, data,customNames, topk,rerank_topn = None,doc_id=[]):
         # Perform a vector search on the collection to find the top-k most similar documents.
         # data是一个向量组，这里在进行批量检索
-        limit_num = int(topk*1023)
-        if (limit_num >= 16384):
-            limit_num = 16383
+        if rerank_topn == None:
+            rerank_topn = 50
+            count = self.count_entity_customNames(customNames)
+            if(count >= rerank_topn*2):
+                rerank_topn = rerank_topn
+            elif(count < rerank_topn*2 and count > topk*2):
+                rerank_topn = count//2
+            elif(count < topk*2 and count >= topk):
+                rerank_topn = topk
+            else:
+                topk = count
+                rerank_topn =count
         try: 
             if(doc_id != []):
+                # 构建子集查询条件
+                conditions = []
+                i = 0
+                while(i >= len(customNames)):
+                    condition = f'(customName == {customNames[i]} AND doc_id == {doc_id[i]})'
+                    conditions.append(condition)
+                    i += 1  
+                filter_expr = ' OR '.join(conditions) 
+                   
                 results = self.client.search(
                     self.collection_name,
                     data,
-                    limit=limit_num,
+                    limit=rerank_topn,
                     anns_field="multiple_image_dense",
-                    filter=f'customName in {customNames} and doc_id in {doc_id}',
+                    filter=filter_expr,
                     output_fields=["multiple_image_dense", "seq_id", "doc_id","customName"],
                     search_params={"metric_type": "IP"}
                 )
@@ -105,7 +128,7 @@ class MilvusColbertRetriever:
                 results = self.client.search(
                     self.collection_name,
                     data,
-                    limit=limit_num,
+                    limit=rerank_topn,
                     anns_field="multiple_image_dense",
                     filter=f'customName in {customNames}',
                     output_fields=["multiple_image_dense", "seq_id", "doc_id","customName"],
@@ -132,7 +155,7 @@ class MilvusColbertRetriever:
                         "doc_id": doc_id,
                         "customName": custom_name
                     })
-        scores = []
+        score_results = []
         def rerank_single_doc(doc, data, client, collection_name):
             # Rerank a single document by retrieving its embeddings and calculating the similarity with the query.
             doc_id = doc["doc_id"]
@@ -153,7 +176,7 @@ class MilvusColbertRetriever:
                     break 
             return (score, doc_id, docPath)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=300) as executor:
+        with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as executor:
             futures = {
                 executor.submit(
                     rerank_single_doc, doc, data, client, self.collection_name
@@ -162,14 +185,13 @@ class MilvusColbertRetriever:
             }
             for future in concurrent.futures.as_completed(futures):
                 score, doc_id, doc = future.result()
-                scores.append((score, doc_id, doc))
- 
-        scores.sort(key=lambda x: x[0], reverse=True)
+                score_results.append((score, doc_id, doc))
+        score_results.sort(key=lambda x: x[0], reverse=True)
         # return scores
-        if len(scores) >= topk:
-            return scores[:topk]
+        if len(score_results) >= topk:
+            return score_results[:topk]
         else:
-            return scores
+            return score_results
         
     
     
@@ -187,8 +209,7 @@ class MilvusColbertRetriever:
         else:
             topk = count
             rerank_topn =count
-        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")       
-        
+            
         res = client.search(
             collection_name=self.collection_name,
             anns_field="single_image_dense",
@@ -196,14 +217,19 @@ class MilvusColbertRetriever:
             limit=int(rerank_topn),
             search_params={"nprobe": 10,"metric_type": "IP"},
             filter=f"seq_id == 0 and customName in {customNames}",
-            output_fields=["doc","doc_id"]
+            output_fields=["doc","doc_id","customName"]
         )
         
         doc_id=[]
+        sub_customNames = []
         for resItem in res:
             for item in resItem:
+                sub_customNames.append(item["customName"])
                 doc_id.append(item["doc_id"])
-        request_3 = self.Img_search(query_param["image_query"],customNames,topk,doc_id)
+        if len(sub_customNames) != len(doc_id):
+            print("sub_customNames与doc_id未一一匹配")
+            return []
+        request_3 = self.Img_search(query_param["image_query"],sub_customNames,topk,rerank_topn,doc_id)
         search_output = []
         for sitem in request_3:
             search_output.append(sitem[2])
@@ -222,12 +248,22 @@ class MilvusColbertRetriever:
             rerank_topn = topk
         else:
             topk = count
-            rerank_topn =count
-        print(f"topk:{topk}\nrerank_topn:{rerank_topn}\ncount:{count}\n")        
-        request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn)
+            rerank_topn =count      
+        request_3 = self.Img_search(query_param["image_query"],customNames,rerank_topn,rerank_topn)
         doc = []
+        doc_id=[]
         for sitem in request_3:
             doc.append(sitem[2])
+            doc_id.append(sitem[1])
+            
+        # 构建子集查询条件
+        conditions = []
+        i = 0
+        while(i >= len(customNames)):
+            condition = f'(doc == {doc[i]} AND doc_id == {doc_id[i]})'
+            conditions.append(condition)
+            i += 1  
+        filter_expr = ' OR '.join(conditions)
             
         res = client.search(
             collection_name=self.collection_name,
@@ -235,7 +271,7 @@ class MilvusColbertRetriever:
             data=[query_param["single_img_qs"]],
             limit=topk,
             search_params={"nprobe": 10,"metric_type": "IP"},
-            filter=f"seq_id == 0 and customName in {customNames} and doc in {doc}",
+            filter=filter_expr,
             output_fields=["doc"]
         )
         
@@ -265,6 +301,44 @@ class MilvusColbertRetriever:
                 for i in range(seq_length)
             ],
         )
+        
+    def bulk_insert_prepare(self, data,writer):
+        multiple_image_dense = data["multiple_image_dense"]
+        seq_length = len(multiple_image_dense)
+        for i in range(seq_length):
+            writer.append_row({
+                "single_image_dense": data["single_image_dense"] if i == 0 else ([0.0] * 2048),
+                "multiple_image_dense": multiple_image_dense[i],
+                "seq_id": i,
+                "doc_id": data["doc_id"],
+                "doc": data["filepath"] if i == 0 else "",
+                "customName": data["customName"]
+            })
+    
+    def bulk_prepare_commit(self,writer):
+        writer.commit()
+        # print('committed')
+        # print(writer.batch_files)
+        
+    def bulk_minio_insert_milvus(self,collection_name,files):
+        resp = bulk_import(
+            url=uri,
+            collection_name=collection_name,
+            files=files,
+        )
+
+        job_id = resp.json()['data']['jobId']
+        print(job_id)
+        
+        
+    def search_import_progress(self,job_id):
+        resp = get_import_progress(
+            url=uri,
+            job_id=job_id,
+        )
+        
+        print(json.dumps(resp.json(), indent=4))
+        return resp.json()
         
     def delete_entity(self,customName):
         res = client.delete(
