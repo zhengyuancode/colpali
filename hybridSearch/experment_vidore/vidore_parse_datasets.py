@@ -70,8 +70,8 @@ def images_to_pdfs(image_folder,output_pdf_name):
                 image = image.convert('RGB')
 
             images_for_pdf.append(image)
-            # 记录第 idx+1 页对应哪个图片
-            page_to_image_map[idx + 1] = file_path.name
+            # 记录哪个图片对应第 idx+1 页
+            page_to_image_map[file_path.name] = idx + 1
 
         # 合并为单个 PDF
         if images_for_pdf:
@@ -103,16 +103,16 @@ async def convert_pdf(
     datasetName
 ):    
     output_dir = documentsPath+"/parse"
-    os.makedirs(output_dir, exist_ok=True)
     
     if not os.path.exists(documentsPath+"/pdf"):
         print("原始图像无法应用mineru解析，转换为pdf中")
-        images_to_pdfs(documentsPath,"vidore_docvqa")
+        images_to_pdfs(documentsPath,datasetName)
     
     pdf_path = documentsPath+f"/pdf/{datasetName}.pdf"
     # pdfID = Path(pdf_path).stem
     
     if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
         logger.info("开始执行minerU解析")
         await asyncio.to_thread(run_mineru, pdf_path, output_dir)
         logger.info("执行minerU解析结束")
@@ -131,8 +131,8 @@ async def convert_pdf(
 
 
 def main():
-    documentsPath = "/root/autodl-tmp/cpdfr-data/cpdfr/hybridSearch/experment_vidore/vidore_data/docvqa_test_subsampled/documents"
-    datasetName = "vidore_docvqa"
+    documentsPath = "/root/autodl-tmp/cpdfr-data/cpdfr/hybridSearch/experment_vidore/vidore_data/tatdqa_test/documents"
+    datasetName = "vidore_tatdqa"
     asyncio.run(convert_pdf(documentsPath,datasetName))
     
     

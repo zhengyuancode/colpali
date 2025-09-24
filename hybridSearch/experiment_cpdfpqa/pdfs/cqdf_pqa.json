@@ -1,0 +1,404 @@
+{
+    "samples": [
+        {
+            "img_path": "pdfs\\1603.05540\\page_24.png",
+            "query": "What is the condition under which the average probabilities of decoding errors tend to zero as the blocklength $ n \\to \\infty $ in the described random coding scheme?"
+        },
+        {
+            "img_path": "pdfs\\1603.05540\\page_4.png",
+            "query": "What is the role of the Tx-conferencing phase in the cooperative communication model described in the document?"
+        },
+        {
+            "img_path": "pdfs\\1603.05540\\page_16.png",
+            "query": "How does dirty paper coding enable Tx k to mitigate interference from its own input signal in the context of Group 3 messages?"
+        },
+        {
+            "img_path": "pdfs\\1603.05540\\page_1.png",
+            "query": "What is the effect of the number of conferencing rounds on the per-user multiplexing gain in Wyner's asymmetric interference network with dedicated conferencing links?"
+        },
+        {
+            "img_path": "pdfs\\1603.05540\\page_2.png",
+            "query": "What is the impact of the number of conferencing rounds on the per-user multiplexing gain in a Wyner network with limited transmitter and receiver cooperation?"
+        },
+        {
+            "img_path": "pdfs\\0805.4780\\page_5.png",
+            "query": "What is the value of $ b_0 $ obtained from the joint analysis of sub-Coulomb $ (d,p) $ and $ (n,\\gamma) $ reactions for $ ^{48}\\text{Ca} $?"
+        },
+        {
+            "img_path": "pdfs\\0805.4780\\page_6.png",
+            "query": "What is the citation for the paper by C. A. Bertulani published in J. Phys. G in 2007?"
+        },
+        {
+            "img_path": "pdfs\\0805.4780\\page_3.png",
+            "query": "What is the significance of the ANC and SF in calculating the (n, γ) cross section for 48Ca(d, p)49Ca reactions?"
+        },
+        {
+            "img_path": "pdfs\\0805.4780\\page_4.png",
+            "query": "What is the extracted spectroscopic factor $ S_{exp} $ and ANC for $ ^{48}\\text{Ca}(d,p)^{49}\\text{Ca}(g.s.) $ at 2 MeV and 56 MeV based on the experimental data shown in Fig. 2 and Fig. 3?"
+        },
+        {
+            "img_path": "pdfs\\0805.4780\\page_1.png",
+            "query": "What is the significance of using (d,p) reactions to extract neutron capture cross sections for short-lived nuclei in astrophysical studies?"
+        },
+        {
+            "img_path": "pdfs\\alg-geom_9705015\\page_5.png",
+            "query": "What is the Castelnuovo bound for the genus of an irreducible nondegenerate variety of dimension $k$ and degree $d$ in $\\mathbb{P}^n$?"
+        },
+        {
+            "img_path": "pdfs\\alg-geom_9705015\\page_19.png",
+            "query": "What is the degree bound for a quadric bundle in $\\mathbb{P}^7$ according to Proposition 5.11?"
+        },
+        {
+            "img_path": "pdfs\\alg-geom_9705015\\page_20.png",
+            "query": "What is the upper bound on the degree $ d $ of a curve section $ C $ not contained in any surface of degree 8, derived from the inequality $ 3d^3 - 8881d^2 - 297064d + 893872 \\leq 0 $?"
+        },
+        {
+            "img_path": "pdfs\\alg-geom_9705015\\page_6.png",
+            "query": "What is the expression for $ F(t) $ in terms of $ \\tilde{F}(t) $ and how does it relate to the cohomology groups $ H^1(\\mathcal{O}_C(t)) $ and $ H^2(\\mathcal{O}_S(t)) $?"
+        },
+        {
+            "img_path": "pdfs\\alg-geom_9705015\\page_3.png",
+            "query": "What is the expression for $ K^2 \\cdot H^2 $ in terms of $ \\chi(\\mathcal{O}_S) $, $ g $, $ d $, and $ \\chi(\\mathcal{O}_{X^3}) $?"
+        },
+        {
+            "img_path": "pdfs\\1502.02826\\page_7.png",
+            "query": "What is the classical limit expression for the linear response function in 1D IR spectroscopy derived from the Poisson bracket formalism?"
+        },
+        {
+            "img_path": "pdfs\\1502.02826\\page_6.png",
+            "query": "What is the expression for the induced molecular dipole moment in terms of the interaction tensor and electrostatic field?"
+        },
+        {
+            "img_path": "pdfs\\1502.02826\\page_1.png",
+            "query": "What is the role of nonlinear system-bath interactions in modeling 2D THz-Raman spectroscopy using a non-Markovian Brownian oscillator model?"
+        },
+        {
+            "img_path": "pdfs\\1502.02826\\page_33.png",
+            "query": "What are the 2D profiles of the R̄AH, R̄RTT, R̄TRT, and R̄TTR components under slow and fast modulation in the anharmonic LL+SL BO model?"
+        },
+        {
+            "img_path": "pdfs\\1502.02826\\page_15.png",
+            "query": "What is the expression for the anharmonic component $\\bar{R}_{\\text{AH}}(t_2, t_1)$ in terms of the commutator of momentum operators?"
+        },
+        {
+            "img_path": "pdfs\\2202.11664\\page_2.png",
+            "query": "What are the two most prominent model-free control techniques in flow control literature based on machine learning?"
+        },
+        {
+            "img_path": "pdfs\\2202.11664\\page_22.png",
+            "query": "What are the key differences in weight selection between LIPO and BO for the 0D control problem as shown in Figure 10?"
+        },
+        {
+            "img_path": "pdfs\\2202.11664\\page_18.png",
+            "query": "What is the angular position and width of each synthetic jet in the 2D von Kármán street control test case?"
+        },
+        {
+            "img_path": "pdfs\\2202.11664\\page_26.png",
+            "query": "What is the performance comparison of DDPG, GP, BO, and LIPO in the viscous Burgers' equation test case based on cumulative rewards and learning variance?"
+        },
+        {
+            "img_path": "pdfs\\2202.11664\\page_28.png",
+            "query": "What are the best reward values achieved by each of the four machine learning methods—LIPO, BO, GP, and DDPG—in the von Kármán street control problem?"
+        },
+        {
+            "img_path": "pdfs\\2304.13883\\page_5.png",
+            "query": "How does SoftKeyScore using BERTScore compare to exact match-based F₁@M in evaluating keyphrase sets?"
+        },
+        {
+            "img_path": "pdfs\\2304.13883\\page_9.png",
+            "query": "What are the limitations of using KPP as a measure in the CatSeq framework for keyphrase generation?"
+        },
+        {
+            "img_path": "pdfs\\2304.13883\\page_6.png",
+            "query": "How does ExHiRD compare to T5 in terms of model calibration across different datasets?"
+        },
+        {
+            "img_path": "pdfs\\2304.13883\\page_8.png",
+            "query": "What is the SoftKeyScore metric and how does it generalize F₁ for keyphrase generation evaluation?"
+        },
+        {
+            "img_path": "pdfs\\2304.13883\\page_7.png",
+            "query": "How does the SoftKeyScore metric compare to exact-match F1 in evaluating keyphrase generation models across different datasets and BERT variants?"
+        },
+        {
+            "img_path": "pdfs\\2003.01318\\page_3.png",
+            "query": "What are the key components of CONVO's technical implementation for voice-based programming?"
+        },
+        {
+            "img_path": "pdfs\\2003.01318\\page_4.png",
+            "query": "What were the three stages participants went through in the CONVO programming environment study?"
+        },
+        {
+            "img_path": "pdfs\\2003.01318\\page_1.png",
+            "query": "What are the research questions explored in the study on conversational programming interface design?"
+        },
+        {
+            "img_path": "pdfs\\2003.01318\\page_5.png",
+            "query": "What were the key differences in participant satisfaction and efficiency between the voice-based and text-based systems in the advanced stage of the study?"
+        },
+        {
+            "img_path": "pdfs\\2003.01318\\page_7.png",
+            "query": "What design recommendations were made for conversational programming systems based on user experience with voice and text input?"
+        },
+        {
+            "img_path": "pdfs\\1408.3293\\page_6.png",
+            "query": "What is the mechanism of persistent current formation in a stirred toroidal condensate as explained in the document?"
+        },
+        {
+            "img_path": "pdfs\\1408.3293\\page_7.png",
+            "query": "What is the significance of persistent currents in Bose-Einstein condensates as discussed in the referenced literature?"
+        },
+        {
+            "img_path": "pdfs\\1408.3293\\page_1.png",
+            "query": "What is the role of dissipative effects in the formation of vortex excitations in a stirred toroidal Bose-Einstein condensate?"
+        },
+        {
+            "img_path": "pdfs\\1408.3293\\page_2.png",
+            "query": "What is the expression for the trapping potential in the toroidal BEC setup described in the document?"
+        },
+        {
+            "img_path": "pdfs\\1408.3293\\page_3.png",
+            "query": "What is the critical angular velocity Ωc for the onset of instability in a 2D Bose-Einstein condensate in a ring trap, as determined from the Bogoliubov spectrum?"
+        },
+        {
+            "img_path": "pdfs\\1006.0640\\page_3.png",
+            "query": "What is the definition of the τ-symbol in the context of pseudo-differential operators as described in the document?"
+        },
+        {
+            "img_path": "pdfs\\1006.0640\\page_6.png",
+            "query": "What is the stochastic analogue of Feynman's formula for solving stochastic differential equations involving pseudo-differential operators and Wiener processes?"
+        },
+        {
+            "img_path": "pdfs\\1006.0640\\page_1.png",
+            "query": "What is the significance of randomized Hamiltonian Feynman integrals in solving stochastic Schrödinger-Itô equations for open quantum systems undergoing continuous measurement?"
+        },
+        {
+            "img_path": "pdfs\\1006.0640\\page_19.png",
+            "query": "What is the significance of the Belavkin equation in the context of quantum measurement and continuous observation as discussed in the references?"
+        },
+        {
+            "img_path": "pdfs\\1006.0640\\page_17.png",
+            "query": "What is the expression for the stochastic Hamiltonian Feynman path integral in terms of the resolvent operator and random trajectories in phase space?"
+        },
+        {
+            "img_path": "pdfs\\nucl-th_0012058\\page_1.png",
+            "query": "What is the initial temperature of the hadronic gas in the WA98 single photon data analysis at CERN SPS?"
+        },
+        {
+            "img_path": "pdfs\\nucl-th_0012058\\page_2.png",
+            "query": "What is the corrected rate for photon production from quark-gluon plasma considering two-loop contributions and the factor of 4 overestimation in previous calculations?"
+        },
+        {
+            "img_path": "pdfs\\nucl-th_0012058\\page_3.png",
+            "query": "What is the effect of initial fluid velocity on photon spectra in the hadronic gas scenario with an initial temperature of 211 MeV?"
+        },
+        {
+            "img_path": "pdfs\\nucl-th_0012058\\page_4.png",
+            "query": "What is the initial temperature of the QGP and hot hadronic gas at an initial time of 0.2 fm for different scenarios, as shown in Table I?"
+        },
+        {
+            "img_path": "pdfs\\nucl-th_0012058\\page_5.png",
+            "query": "What is the pressure as a function of temperature for a hadronic gas with particles of mass less than 2 GeV, and how well does it fit to a $a_h T^4$ model?"
+        },
+        {
+            "img_path": "pdfs\\2311.16899\\page_7.png",
+            "query": "What is the value of |E(G)| when s_{6,2} = k - 3 and a_0 is chosen from [6, n - 5k + 7]?"
+        },
+        {
+            "img_path": "pdfs\\2311.16899\\page_9.png",
+            "query": "What is the significance of the graph $ M(G) $ in the context of $ kC_{\\geq 3} $-saturated graphs?"
+        },
+        {
+            "img_path": "pdfs\\2311.16899\\page_17.png",
+            "query": "What is the significance of Claim 3 in establishing that $ H = C \\cap (C^1 \\cup C^2 - \\{b,c\\}) $ is a path in the context of the graph $ G $?"
+        },
+        {
+            "img_path": "pdfs\\2311.16899\\page_16.png",
+            "query": "What is the minimum degree condition for an n-vertex good 2C≥3-saturated graph with n ≥ 7 and m ≥ 2n − 1?"
+        },
+        {
+            "img_path": "pdfs\\2311.16899\\page_6.png",
+            "query": "What is the saturation number $ sat(n, kC_{\\geq 3}) $ for $ k \\geq 2 $ and $ n \\geq \\max\\{3k, 4k - 3\\} $?"
+        },
+        {
+            "img_path": "pdfs\\2202.10706\\page_11.png",
+            "query": "What is the significance of assumption 3 in establishing the completeness of AGG for relational d-separation?"
+        },
+        {
+            "img_path": "pdfs\\2202.10706\\page_1.png",
+            "query": "What is the significance of relational σ-separation in cyclic relational causal models?"
+        },
+        {
+            "img_path": "pdfs\\2202.10706\\page_12.png",
+            "query": "What is the condition for the abstract ground graph σ-AGGₘₛ to be a cyclic directed graph?"
+        },
+        {
+            "img_path": "pdfs\\2202.10706\\page_15.png",
+            "query": "What is the title of the book by Judea Pearl published in 1988?"
+        },
+        {
+            "img_path": "pdfs\\2202.10706\\page_10.png",
+            "query": "What conditions ensure that every abstract ground graph can be realized as a ground graph under the assumption that the degree of any entity in the relational skeleton is greater than one?"
+        },
+        {
+            "img_path": "pdfs\\2106.03972\\page_2.png",
+            "query": "What is the role of urban hierarchy and geographical distance in the spatial diffusion of innovations, as analyzed using data from the iWiW social media platform?"
+        },
+        {
+            "img_path": "pdfs\\2106.03972\\page_6.png",
+            "query": "How does the inclusion of second-order terms in the regression model capture hierarchical changes in invitation patterns across settlement sizes over time?"
+        },
+        {
+            "img_path": "pdfs\\2106.03972\\page_17.png",
+            "query": "What is the trend in the average distance of invitations from 2002 to 2012 according to Figure 7?"
+        },
+        {
+            "img_path": "pdfs\\2106.03972\\page_9.png",
+            "query": "What does the coefficient χ in Figure 4 represent in the context of spatial diffusion of invitations?"
+        },
+        {
+            "img_path": "pdfs\\2106.03972\\page_25.png",
+            "query": "What are the coefficient estimates and standard errors for the variable log α in the zero-inflated negative binomial regression models for the years 2008, 2009, 2010, 2011, and 2012?"
+        },
+        {
+            "img_path": "pdfs\\1004.5276\\page_3.png",
+            "query": "What is the physical significance of the first-order jump in the renormalized hopping $ t^* $ at a critical value of $ V $ in the context of the meta-nematic transition?"
+        },
+        {
+            "img_path": "pdfs\\1004.5276\\page_9.png",
+            "query": "What is the renormalization group flow equation for the backscattering amplitude $ g_1 $ in the limit of zero interchain hopping?"
+        },
+        {
+            "img_path": "pdfs\\1004.5276\\page_7.png",
+            "query": "What is the form of the first-order vertex correction in the context of the Hartree-Fock self-energy and how does it relate to the vanishing of the integration over transverse momentum?"
+        },
+        {
+            "img_path": "pdfs\\1004.5276\\page_5.png",
+            "query": "What is the expression for the critical interaction strength $ V_c $ in terms of $ x_0 $ and $ a $, as derived from the condition where the energy of the two local minima becomes equal?"
+        },
+        {
+            "img_path": "pdfs\\1004.5276\\page_13.png",
+            "query": "What is the form of the kinetic energy in the anisotropic model when $ t_\\perp < t_\\parallel $ and less than half filling?"
+        },
+        {
+            "img_path": "pdfs\\cs_9911002\\page_15.png",
+            "query": "What is the significance of Theorem 14 in the context of regular languages with polynomial complexity?"
+        },
+        {
+            "img_path": "pdfs\\cs_9911002\\page_22.png",
+            "query": "What is the significance of the condition $\\lambda = \\left(\\frac{\\Gamma}{sCk}\\right)^{l+1}$ in contradicting the hypothesis that $\\Gamma, s, C,$ and $k$ are integers?"
+        },
+        {
+            "img_path": "pdfs\\cs_9911002\\page_28.png",
+            "query": "What is the significance of the determinant condition in Remark 3 for verifying the recurrence relation of states in the automaton M?"
+        },
+        {
+            "img_path": "pdfs\\cs_9911002\\page_1.png",
+            "query": "What is the characterization of S-recognizable subsets of ℕ in terms of rational series with noncommuting variables and coefficients in ℕ?"
+        },
+        {
+            "img_path": "pdfs\\cs_9911002\\page_3.png",
+            "query": "What is the definition of $ v_l(k) $ in the context of a deterministic finite automaton accepting a regular language $ L $?"
+        },
+        {
+            "img_path": "pdfs\\1609.08528\\page_5.png",
+            "query": "What is the critical value of the parameter $ c $ that determines whether the expansion impulse at the singularity dissociates a bound system, based on the analytical estimate derived from energy considerations?"
+        },
+        {
+            "img_path": "pdfs\\1609.08528\\page_4.png",
+            "query": "What is the form of the geodesic solution $ r(t) $ for a free particle in a universe with a sudden singularity at $ t = 0 $, and how do the analytical and numerical solutions compare for different values of $ \\eta $?"
+        },
+        {
+            "img_path": "pdfs\\1609.08528\\page_8.png",
+            "query": "What is the significance of the growth index in the presence of dark energy perturbations according to Nesseris and Perivolaropoulos?"
+        },
+        {
+            "img_path": "pdfs\\1609.08528\\page_3.png",
+            "query": "What is the form of the geodesic equation for a test particle in physical coordinates when the scale factor approaches a singularity in an expanding background?"
+        },
+        {
+            "img_path": "pdfs\\1609.08528\\page_6.png",
+            "query": "What is the critical parameter $ c_{cr} $ for bound system dissociation in terms of $ \\omega_0 $ and $ \\eta $, as determined from the empirical relation in equation (4.5)?"
+        },
+        {
+            "img_path": "pdfs\\2112.11278\\page_8.png",
+            "query": "What is the significance of Lemma 2.5 in the context of proving Proposition 2.2, particularly regarding the estimates involving $ R_{Y,j} $ and $ R_k $?"
+        },
+        {
+            "img_path": "pdfs\\2112.11278\\page_14.png",
+            "query": "What is the significance of the bootstrap estimate in the proof of Proposition 2.6?"
+        },
+        {
+            "img_path": "pdfs\\2112.11278\\page_39.png",
+            "query": "What is the significance of the commutator estimate involving $[|D|^{\\frac{\\alpha}{2}}\\chi(D), \\sqrt{\\psi}]u$ in the proof of Corollary E.3?"
+        },
+        {
+            "img_path": "pdfs\\2112.11278\\page_27.png",
+            "query": "What is the significance of the lower bound estimate for the scalar product $(c_1 - 2\\sigma_0)\\int \\eta R_1$ in the proof of Proposition 4.4?"
+        },
+        {
+            "img_path": "pdfs\\2112.11278\\page_19.png",
+            "query": "What are the weighted estimates for the non-linear terms in the fractional Korteweg-de Vries equation as stated in Lemma 3.6 and Lemma 3.7?"
+        },
+        {
+            "img_path": "pdfs\\astro-ph_0207431\\page_14.png",
+            "query": "What is the luminosity of the X-ray emission feature identified as Fe XXV in Table 1?"
+        },
+        {
+            "img_path": "pdfs\\astro-ph_0207431\\page_7.png",
+            "query": "What role does the starburst ring play in obscuring the central continuum source in NGC 253?"
+        },
+        {
+            "img_path": "pdfs\\astro-ph_0207431\\page_13.png",
+            "query": "What is the approximate size of the central region depicted in the cartoon of NGC 253?"
+        },
+        {
+            "img_path": "pdfs\\astro-ph_0207431\\page_15.png",
+            "query": "What is the unabsorbed flux in units of 10⁻¹³ ergs cm⁻² s⁻¹ for the M+P model with a power-law index of 1.7f in the Chandra spectrum fit of NGC 253?"
+        },
+        {
+            "img_path": "pdfs\\astro-ph_0207431\\page_5.png",
+            "query": "What is the estimated ratio of inverse Compton to synchrotron luminosities in NGC 253 based on the energy densities of the seed photon field and magnetic field?"
+        },
+        {
+            "img_path": "pdfs\\0706.0967\\page_3.png",
+            "query": "What is the role of the zeroth bit in the comb structure when defining the complex structure map $i$ in the context of Clifford algebra?"
+        },
+        {
+            "img_path": "pdfs\\0706.0967\\page_10.png",
+            "query": "What is the author's opinion on the \"old\" approach to coding bits with multivectors compared to the method used in the present paper?"
+        },
+        {
+            "img_path": "pdfs\\0706.0967\\page_2.png",
+            "query": "What is the role of the blade $ b_{n+1} $ in the geometric algebra formalism for binary parametrization?"
+        },
+        {
+            "img_path": "pdfs\\0706.0967\\page_11.png",
+            "query": "What is the citation for the 1998 Physics Letters A paper by Somaroo, Cory, and Havel?"
+        },
+        {
+            "img_path": "pdfs\\0706.0967\\page_9.png",
+            "query": "What is the geometric interpretation of the multivector $1 + b_n$ in the context of Clifford algebra and quantum gates?"
+        },
+        {
+            "img_path": "pdfs\\1711.10818\\page_2.png",
+            "query": "What is the definition of the weak tracial Rokhlin property for finite group actions on simple nonunital C*-algebras as given in Definition 1.1?"
+        },
+        {
+            "img_path": "pdfs\\1711.10818\\page_32.png",
+            "query": "What conditions are required for a simple C*-algebra to have Property (T₀) according to Proposition A.15?"
+        },
+        {
+            "img_path": "pdfs\\1711.10818\\page_9.png",
+            "query": "What is the significance of Lemma 3.4 in proving that $(z^2 - zfz - \\varepsilon)_+ \\precsim_A x$ in the context of the weak tracial Rokhlin property?"
+        },
+        {
+            "img_path": "pdfs\\1711.10818\\page_8.png",
+            "query": "What is the significance of the weak tracial Rokhlin property in ensuring the simplicity of the crossed product algebra $ A \\rtimes_\\alpha G $?"
+        },
+        {
+            "img_path": "pdfs\\1711.10818\\page_37.png",
+            "query": "What is the significance of the tracial Rokhlin property in the context of crossed products by finite group actions on C*-algebras?"
+        }
+    ]
+}

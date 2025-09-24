@@ -53,10 +53,9 @@ embeder=QwenEmbeder(url="https://api.siliconflow.cn/v1/embeddings")
 
 
 # Login using e.g. `huggingface-cli login` to access this dataset
-ds = load_dataset("vidore/tatdqa_test",
-                   split="test")
-ds.save_to_disk("./vidore_data/tatdqa_test")
-print(ds[0])
+# ds = load_dataset("vidore/tatdqa_test",
+#                    split="test")
+# ds.save_to_disk("./vidore_data/tatdqa_test")
 
 # ds = load_from_disk("./vidore_data/docvqa_test_subsampled")
 
@@ -64,12 +63,29 @@ documents_folder_path = './vidore_data/tatdqa_test/documents'
 if not os.path.exists(documents_folder_path):
     os.makedirs(documents_folder_path)
 
-
+# docvqa
+# def getDocumentImg(documents_folder_path,ds):
+#     for item in tqdm(ds, desc="save img", total=len(ds)):
+#         docement_name = str(item["questionId"])+"_"+str(item["docId"])+"_"+item["image_filename"]+"_"+item["page"]+".png"
+#         img = item['image']
+#         img.save(documents_folder_path+"/"+docement_name)
+#     print("get img done")
+    
+# tatdqa
 def getDocumentImg(documents_folder_path,ds):
-    for item in tqdm(ds, desc="save img", total=len(ds)):
-        docement_name = str(item["questionId"])+"_"+str(item["docId"])+"_"+item["image_filename"]+"_"+item["page"]+".png"
-        img = item['image']
-        img.save(documents_folder_path+"/"+docement_name)
+    tatdqa = {"examples":[]}
+    for i in tqdm(range(len(ds)), desc="save img", total=len(ds)):
+        document_name = Path(ds[i]["image_filename"]).stem + "_" + ds[i]["page"] + ".png"
+        document_path = documents_folder_path+"/"+document_name
+        if not Path(document_path).exists():
+            img = ds[i]['image']
+            img.save(str(document_path))
+        tatdqa["examples"].append({
+            "query":ds[i]["query"],
+            "image":document_path
+        })
+    with open(documents_folder_path+"/tatdqa.json", 'w', encoding='utf-8') as f:
+        json.dump(tatdqa, f, ensure_ascii=False, indent=4) 
     print("get img done")
     
 def preProcess_milvus_vidore(pages_path: Path,collection_name,customName,writer):
@@ -168,7 +184,7 @@ def preProcess_milvus_vidore(pages_path: Path,collection_name,customName,writer)
     # return {"message": "RAG知识库搭建成功"}
 
 def main():
-    collection_name = "vidore_docvqa"
+    collection_name = "vidore_tatdqa"
     
     connections.connect(
         uri="http://127.0.0.1:19530", 
@@ -203,7 +219,7 @@ def main():
     # )
     writer = RemoteBulkWriter(
         schema=schema,
-        remote_path="/vidore_docvqa",
+        remote_path="/vidore_tatdqa",
         connect_param=conn,
         file_type=BulkFileType.PARQUET
     )
@@ -214,5 +230,5 @@ def main():
     
 
 if __name__ == "__main__":
-    #main()
-	 getDocumentImg(documents_folder_path,ds)
+    main()
+	#  getDocumentImg(documents_folder_path,ds)
