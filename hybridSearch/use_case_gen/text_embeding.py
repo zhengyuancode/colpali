@@ -2,6 +2,8 @@ import os
 from openai import OpenAI
 import json
 import requests
+import numpy as np
+
 
 
 
@@ -32,4 +34,4 @@ class QwenEmbeder:
                                     max_length=512,
                                     )['dense_vecs'][0]
 
-        return embeddings
+        return embeddings.astype(np.float32)

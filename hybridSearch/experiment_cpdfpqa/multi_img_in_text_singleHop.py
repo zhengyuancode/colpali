@@ -111,62 +111,58 @@ async def multi_img_in_text_search_answer(
     hybrid_text_retriever,
     embeder
 ): 
-    try:
-        search_results_list = await asyncio.to_thread(
-            multi_img_in_text_search, [query], file_names, topk, mymodel, myprocessor, mydevice, multi_img_retriever, hybrid_text_retriever, embeder, needRewrit = False
-        )
+    search_results_list = await asyncio.to_thread(
+        multi_img_in_text_search, [query], file_names, topk, mymodel, myprocessor, mydevice, multi_img_retriever, hybrid_text_retriever, embeder, needRewrit = False
+    )
 
-        search_results = search_results_list[0]
-                                    
-        # 准备图片用于生成器   
-        # base64_images=[]
-        # try:
-        #     for image_path in search_results:
-        #         base64_str = image_to_base64(image_path) 
-        #         base64_images.append({
-        #             "type": "image_url",
-        #             "image_url": {"url": f"data:image/png;base64,{base64_str}"}
-        #         })
-        # except Exception as e:
-        #     logger.error(f"准备图片时出错: {str(e)}")
-        #     continue  # 跳过当前查询
-        
-        #需要进行检索结果与答案都正确的实验    
-        # try:
-        #     response  = AIclient.chat.completions.create(
-        #         model="qwen-vl-max-latest", 
-        #         messages=[
-        #         {"role":"system","content":[{"type": "text", "text": "You need to combine the image information provided by the user's document page with your own knowledge base to answer the user's query. Your answer should be in English.Your answer needs to be as concise as possible."}]},
-        #         {
-        #             "role": "user",
-        #             "content": base64_images + [{"type": "text", "text": queries[j]}]
-        #         }
-        #         ]
-        #     )
-        # except Exception as e:
-        #     logger.error(f"调用阿里云 API 失败: {str(e)}")
-        #     continue
-        
-        # # 这里默认queries只有一个query
-        # answer = {
-        #     "uid":uid,
-        #     "query":queries[j],
-        #     "answer":response.choices[0].message.content,
-        #     "pages":search_results
-        #     }
-        
-        # Conduct experiments solely based on search results
-        answer = {
-            "query":query,
-            "answer":"",
-            "pages":search_results,
-            "judge":1 if img_path in search_results else 0
-            }
-                      
-        return answer                
-    except Exception as e:
-        logger.error(f"Error during search: {str(e)}")
-        return   
+    search_results = search_results_list[0]
+                                
+    # 准备图片用于生成器   
+    # base64_images=[]
+    # try:
+    #     for image_path in search_results:
+    #         base64_str = image_to_base64(image_path) 
+    #         base64_images.append({
+    #             "type": "image_url",
+    #             "image_url": {"url": f"data:image/png;base64,{base64_str}"}
+    #         })
+    # except Exception as e:
+    #     logger.error(f"准备图片时出错: {str(e)}")
+    #     continue  # 跳过当前查询
+    
+    #需要进行检索结果与答案都正确的实验    
+    # try:
+    #     response  = AIclient.chat.completions.create(
+    #         model="qwen-vl-max-latest", 
+    #         messages=[
+    #         {"role":"system","content":[{"type": "text", "text": "You need to combine the image information provided by the user's document page with your own knowledge base to answer the user's query. Your answer should be in English.Your answer needs to be as concise as possible."}]},
+    #         {
+    #             "role": "user",
+    #             "content": base64_images + [{"type": "text", "text": queries[j]}]
+    #         }
+    #         ]
+    #     )
+    # except Exception as e:
+    #     logger.error(f"调用阿里云 API 失败: {str(e)}")
+    #     continue
+    
+    # # 这里默认queries只有一个query
+    # answer = {
+    #     "uid":uid,
+    #     "query":queries[j],
+    #     "answer":response.choices[0].message.content,
+    #     "pages":search_results
+    #     }
+    
+    # Conduct experiments solely based on search results
+    answer = {
+        "query":query,
+        "answer":"",
+        "pages":search_results,
+        "judge":1 if img_path in search_results else 0
+        }
+                    
+    return answer                
 
 
 # Retrieve query statements from the dataset, Customizable logic to adapt to different datasets
@@ -185,7 +181,7 @@ def get_queries():
 
 async def main():    
     
-    experiment_name = "multi_img_in_text_singleHop_cpdfpqa_topkx25"
+    experiment_name = "multi_img_in_text_singleHop_cpdfpqa_topkx30"
     multi_img_collection_name = "vidore_tatdqa"
     hybrid_text_collection_name = "vidore_tatdqa_text"
     file_names = ["vidore_tatdqa"]
@@ -226,29 +222,42 @@ async def main():
     
     pbar.close()
     
-    total = len(results)
-    acc = 0
-    for item in results:
-        if item["judge"] == 1:
-            acc += 1
-    accuracy = round(acc / total,3)
-    
-    eval_result = {
-        "total": total,
-        "acc": acc,
-        "accuracy": accuracy
-    }
-    
-    result_file = f"{experiment_name}_results.json"   
-    result_data = {
-        "singleHop":results,
-        "eval_result":eval_result
-        } 
-    
-    with open(result_file, 'w', encoding='utf-8') as f:
-        json.dump(result_data, f, ensure_ascii=False, indent=4) 
-    print(f"check {result_file}")
-    return result_file
+    try:
+        total = len(results)
+        acc = 0
+        for item in results:
+            if item["judge"] == 1:
+                acc += 1
+        accuracy = round(acc / total,3)
+        
+        eval_result = {
+            "total": total,
+            "acc": acc,
+            "accuracy": accuracy
+        }
+        
+        result_file = f"{experiment_name}_results.json"   
+        result_data = {
+            "singleHop":results,
+            "eval_result":eval_result
+            } 
+        
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=4) 
+        print(f"check {result_file}")
+        return result_file
+    except Exception as e:
+        logger.error(f"Error during evaluation: {str(e)}")
+        result_file = f"{experiment_name}_results.json"   
+        result_data = {
+            "singleHop":results,
+            "eval_result":{}
+            } 
+        
+        with open(result_file, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, ensure_ascii=False, indent=4) 
+        print(f"check {result_file}")
+        return result_file
 
 if __name__ == "__main__":
     asyncio.run(main())

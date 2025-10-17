@@ -149,7 +149,7 @@ def check_rewrite_caption_text(path):
         
 
 # 上传本地的向量数据到minio
-# retriever = MilvusColbertRetriever(collection_name="vidoseek", milvus_client=client)
+# retriever = MilvusColbertRetriever(collection_name="MMLongDoc", milvus_client=client)
 # remote_files = retriever.bulk_LocalData_upload("/home/gpu/milvus/backend/colpali/ViDoSeek/bulkInsert","c494711a-1dbe-43f2-9d18-994eb651957d")
 
 #将minio的向量数据插入milvus,minio上的数据，登录localhost:9001查看数据存储路径

@@ -33,5 +33,5 @@ def main(prefix,collection_name):
     retriever.bulk_minio_insert_milvus(collection_name,parquet_files)
     
 if __name__ == "__main__":
-    main(prefix="MMLongDoc/3965bd2d-ed43-4a42-9966-8a6457dcaf2f/",collection_name="MMLongDoc")
+    main(prefix="MMLongDoc/35695d69-035d-427d-8108-9a18c6eaa7cc/",collection_name="MMLongDoc")
     

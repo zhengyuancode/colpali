@@ -35,7 +35,7 @@ class QwenEmbeder:
             "encoding_format":"float"
         }
         headers = {
-            "Authorization": "Bearer sk-splwhbmdyruezezpmskzubvdsrvgvufmrnyhcsoedfcgqwoh",
+            "Authorization": "Bearer sk-xlgtscjecqqgawhkzfzdhqgosmoywwszhufwqoqlmnzgnvxp",
             "Content-Type": "application/json"
         }
         
