@@ -5,8 +5,7 @@ import torch
 from milvus_conf import MilvusColbertRetriever, client as milvus_client
 from tqdm import tqdm
 import logging
-from text_embeding import QwenEmbeder
-from prompt import use_case_search_prompt
+from prompt import Actor_search_prompt,Actor_search_prompt2
 from transformers import AutoModel
 from openai import OpenAI
 import os
@@ -38,7 +37,6 @@ def init_model():
         )
     embeder.to("cuda")
     return embeder, topNmodel, scaler
-
 
 def multi_img_search(queries: List[str], file_names: List[str], topk: int, embeder,  topNmodel, scaler, multi_img_retriever):
     search_results_list = []
@@ -108,10 +106,10 @@ def qwen_vl_max(image_paths, userInput, assistant = ""):
         )
     return completion.choices[0].message.content
 
-# By default, only one query is entered here
-async def multi_img_search_multiHop_usecases(
-    sys_name,
-    actor,
+
+def gen_actor(
+    system_description,
+    user_query,
     topk: int,
     file_names,
     embeder,
@@ -119,34 +117,40 @@ async def multi_img_search_multiHop_usecases(
     scaler,
     multi_img_retriever,
     page_count_max = 100,
+    repeat_limit = 3
 ): 
     history_pages = []
     multiHop_count = 0
-    actor_valid = "yes"
-    query = actor+"的目标是什么，在系统中有哪些用例？"
-    use_cases = []
+    query = user_query
+    actors = []
+    repeat = 0
     history_queries = []
     assistant = ""
     while(len(history_pages) < page_count_max):
+        print(actors)
         if assistant == "":
             search_results_list =  multi_img_search([query], file_names, topk, embeder, topNmodel, scaler, multi_img_retriever)
             
             search_results = search_results_list[0]
-            
+                    
             history_pages.extend(search_results)
             history_queries.append(query)
-            userInput = f"当前系统为：{sys_name}\n" + use_case_search_prompt + "\n [actor]:" + actor + "\n [history use cases]:" + json.dumps(use_cases) + "\n [history queries]:" + json.dumps(history_queries)   
+            userInput = Actor_search_prompt + f"{system_description}\n [history actors]:" + json.dumps(actors) + "\n [history queries]:" + json.dumps(history_queries)   
+        
                                 
         answer = qwen_vl_max(search_results, userInput, assistant)
         try:
-            res = json.loads(answer)
+            res = json.loads(answer) 
             assistant = ""
             multiHop_count += 1
-            if res["actor_valid"] == "no":
-                use_cases = []
-                actor_valid = "no"
-                break
-            use_cases = res["use_cases"]
+            if res["actors"] == actors:
+                repeat += 1
+                print(f"重复次数{repeat}")
+                if repeat > repeat_limit:
+                    break
+            else:
+                repeat = 0
+            actors = res["actors"]
             if res["query"].strip() == "": 
                 break
             else:
@@ -157,48 +161,36 @@ async def multi_img_search_multiHop_usecases(
             continue
 
    
-    return {"actor": actor, "use_cases": use_cases,"actor_valid": actor_valid}       
+    return actors       
              
 
-async def main():    
-    multi_img_collection_name = "NonMD_Req"
-    file_names = ["Smart City Big Data Center"]
-    page_count_max = 100
-    sys_name = "智慧城市大数据中心"
-    
-    # actors = ['租户', '系统管理员', '超级管理员', '运维人员', '部门管理员', '订阅管理员', '中心管理员', '普通用户', '外部系统', '服务器', '数据采集系统', '数据集成系统', 'Hadoop分布式文件系统(HDFS)', 'HBase', 'Elasticsearch', 'MySQL', 'Hive', 'API网关平台', '消息服务中间件', '短信服务提供商', '产品设计人员', 'DevOps工程师', '监控告警系统', '资源目录管理员', '场景管理员', '数据资产管理员', 'API发布专员', '微应用发布专员', '角色管理员', '数据质量审核员', '安全审计员', '合规性审查员', '内容审核员', 'CMS操作员', '自动化运维工具', '数据分析师', '架构师']
-    actors = ['租户', '系统管理员']
+def main():    
+    multi_img_collection_name = "OR2UC"
+    multi_img_retriever = MilvusColbertRetriever(collection_name=multi_img_collection_name, milvus_client=milvus_client)
+    file_names = ["ant rent"]
+    page_count_max = multi_img_retriever.count_page_by_file(file_names)
+    repeat_limit = 3
+    system_description = "蚂蚁短租租房系统"
+    first_query = "系统功能，项目介绍，业务流程是什么？"
+    topk = 2
     
     embeder, topNmodel, scaler = init_model()
-    multi_img_retriever = MilvusColbertRetriever(collection_name=multi_img_collection_name, milvus_client=milvus_client)
     
-    # Create semaphore and limit maximum concurrency
-    semaphore = asyncio.Semaphore(1)
-    
-    pbar = tqdm(total=len(actors), desc="Searching UseCases")
-    
-    async def run_with_semaphore(actor):
-        async with semaphore:
-            result = await multi_img_search_multiHop_usecases(
-                sys_name,
-                actor,
-                5,
+    result = gen_actor(
+                system_description,
+                first_query,
+                topk,
                 file_names,
                 embeder,
                 topNmodel,
                 scaler,
                 multi_img_retriever,
-                page_count_max
+                page_count_max,
+                repeat_limit
             )
-            pbar.update(1)
-            return result
-            
     
-    tasks = [run_with_semaphore(actor) for actor in actors]  
-    ucs = await asyncio.gather(*tasks)
     
-    pbar.close()
-    print(ucs)
+    print(result)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

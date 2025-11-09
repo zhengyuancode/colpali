@@ -9,10 +9,9 @@ import logging
 from milvus_conf import MilvusColbertRetriever, client as milvus_client
 from pymilvus import Collection,connections
 from pymilvus.bulk_writer import BulkFileType,RemoteBulkWriter
-import json
-import os
 from transformers import AutoModel
-from pdf_image import pdfToImage
+import ast
+from upload_milvus import upload_milvus
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -63,19 +62,18 @@ def upload_minio(page_paths, retriever, file_name, writer, mymodel):
             "page_path": str(page_path),
             "file_name": file_name,
             }
-        # A small amount of insertion can be done without going through Minio
-        # retriever.insert(data)
-        
-        # Batch insertion requires going through Minio
         retriever.bulk_insert_prepare_multi_img(data,writer)
         if (i+1) % 100 == 0:
             retriever.bulk_prepare_commit(writer)  
     retriever.bulk_prepare_commit(writer) 
+    
+    batch_files = writer.batch_files
+    if isinstance(batch_files, str):
+        batch_files = ast.literal_eval(batch_files)
+    path_str = batch_files[0][0]
+    return path_str[:path_str.rfind('/') + 1]
 
-def main():
-    collection_name = "OR2UC"
-    
-    
+def preprocess_multiImg(collection_name, output_dir, pdf_name, embeder):
     # Initialize Milvus
     if(milvus_client.has_collection(collection_name=collection_name)):
         logger.info(f"{collection_name} vector database already exists.")
@@ -118,36 +116,24 @@ def main():
         file_type=BulkFileType.PARQUET
     )
     
-    embeder = init_model()
-    # Modify the logic of different datasets
-    pdf_dir = "/home/gpu/dzy/M3-CaseRAG/use_case_gen/OR2UC/prd"  
-    for file_path in tqdm(os.listdir(pdf_dir), desc="Processing PDFs",total=len(os.listdir(pdf_dir))):
-        if file_path.lower().endswith('.pdf'):      
-            pdf_name = os.path.splitext(file_path)[0]
-            output_dir = os.path.join(pdf_dir, pdf_name)
+    page_paths = []
+    dataset_path = Path(output_dir)
+    image_extensions = {'.jpg', '.jpeg', '.png'}
+    for path in dataset_path.glob('*'):
+        if path.is_file() and path.suffix.lower() in image_extensions:
+            page_paths.append(str(path))
     
-            page_paths = []
-            dataset_path = Path(output_dir)
-            
-            image_extensions = {'.jpg', '.jpeg', '.png'}
-            if not dataset_path.exists():
-                os.makedirs(dataset_path)
-                logger.info(f"Create Path: {str(dataset_path)}")
-                pdfToImage(os.path.join(pdf_dir, file_path), output_dir)
-                
-            for path in dataset_path.glob('*'):
-                if path.is_file() and path.suffix.lower() in image_extensions:
-                    page_paths.append(str(path))     
-            
-            
-            # Formally importing milvus requires building through this path
-            # Remember the Minio bucket path prompted during execution
-            # eg. 
-            # Upload file '/root/autodl-tmp/cpdfr-data/cpdfr/hybridSearch/experiment_cpdfpqa/bulk_writer/5be22173-7649-4f78-9cd8-c36be645d74f/1.parquet' to 'cpdf_pqa/5be22173-7649-4f78-9cd8-c36be645d74f/1.parquet' (remote_bulk_writer.py:256)
-            if page_paths == []:
-                logger.warning(f"No image files found for {pdf_name}, please check if the PDF has been converted to images.")
-                continue
-            upload_minio(page_paths, retriever, pdf_name, writer, embeder)
+    prefix = upload_minio(page_paths, retriever, pdf_name, writer, embeder)
+    job_id = upload_milvus(prefix, collection_name)
+    milvus_client.release_collection(
+        collection_name=collection_name
+    )
+    return job_id
+
+def main():
+    collection_name = "LongDocURL"
+    
+    
     
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@ from pymilvus import MilvusClient, DataType, Function, FunctionType, AnnSearchRe
 from pymilvus.bulk_writer import bulk_import,get_import_progress
 import numpy as np
 import concurrent.futures
-import json
 import os
 
 
@@ -579,13 +578,14 @@ class MilvusColbertRetriever:
 
         job_id = resp.json()['data']['jobId']
         print(f"Current batch import jobId:{job_id}\nPlease remember that jobId can be used to view the import progress in the future.")
+        return job_id
+        
         
     def search_import_progress(self,job_id):
         resp = get_import_progress(
             url=uri,
             job_id=job_id,
         )
-        print(json.dumps(resp.json(), indent=4))
         return resp.json()
         
     def delete_entity_by_file(self,file_name):
@@ -636,7 +636,7 @@ class MilvusColbertRetriever:
     def count_file_all(self):
         res = client.query(
             collection_name=self.collection_name,
-            filter=f"seq_id == 0 and doc_id == 0",
+            filter=f"seq_id == 0 and page_num == 0",
             output_fields=["count(*)"]
         )
         count_value = res[0]['count(*)']

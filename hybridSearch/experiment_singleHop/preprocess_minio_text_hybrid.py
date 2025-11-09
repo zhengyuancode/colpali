@@ -23,24 +23,29 @@ logger = logging.getLogger(__name__)
 
 
 QWENAPIKEY="sk-f78b07615c8a45128d760579e6d42e1f"
-DMXAPIKEY="sk-gWMA9DJgGb2QzeIa7L7nOvWeXpeESrBAB6SXVflIjnafbonl"
-
-# AIclient = OpenAI(
-#     api_key=QWENAPIKEY,
-#     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-# )
+# DMXAPIKEY="sk-gWMA9DJgGb2QzeIa7L7nOvWeXpeESrBAB6SXVflIjnafbonl"
 
 AIclient = OpenAI(
-    api_key=DMXAPIKEY,
-    base_url="https://www.dmxapi.cn/v1",
-    max_retries=50
+    api_key=QWENAPIKEY,
+    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
+# AIclient = OpenAI(
+#     api_key=DMXAPIKEY,
+#     base_url="https://www.dmxapi.cn/v1",
+#     max_retries=50
+# )
+
 def init_model():
+    #local load
+    model_path = "/home/gpu/.cache/huggingface/hub/models--jinaai--jina-embeddings-v4/snapshots/737fa5c46f0262ceba4a462ffa1c5bcf01da416f"
+    
     model = AutoModel.from_pretrained(
-        "jinaai/jina-embeddings-v4", 
+        model_path,
         trust_remote_code=True, 
-        torch_dtype=torch.float16)
+        torch_dtype=torch.float16,
+        local_files_only=True
+        )
     model.to("cuda")
     return model
 
@@ -57,7 +62,7 @@ def upload_minio(chunks, retriever, writer, embeder):
             text_dense = embeder.encode_text(
                             texts=[text],
                             task="retrieval",
-                            prompt_name="query"
+                            prompt_name="passage"
                         )[0].float().cpu().numpy()
         data = {
             "text": text,
@@ -125,24 +130,27 @@ def getCaption(image_path,language,client,isPage = False):
         prompt = f"Please carefully analyze the currently provided page images, identify all the content (including text, tables, images, formulas, codes, and other meaningful information), and describe them in detail with textual information. Pay attention to and describe page numbers, chart numbers, or other identifiers (if any). Your answer must be in {language} and kept concise and accurate"
     else:
         prompt = f"Carefully analyze the image and describe its content in detail, using concise language.Your answer can only be in {language}."
-        
-    completion  = client.chat.completions.create(
-        # model="qwen-vl-max", 
-        model="gpt-4.1-mini",
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{image_to_base64(image_path)}"},
-                        },
-                        {"type": "text", "text": prompt},
-                    ]
-            }
-        ]
-    )
-    return completion.choices[0].message.content
+    try:
+        completion  = client.chat.completions.create(
+            model="qwen-vl-plus", 
+            # model="gpt-4.1-mini",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/png;base64,{image_to_base64(image_path)}"},
+                            },
+                            {"type": "text", "text": prompt},
+                        ]
+                }
+            ]
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        print(f"Error generating caption for {image_path}: {str(e)}")
+        return ""
 
 def getTextList(block_path,language,image_dir,output_path,client,page_dir):  
     textList=[]
@@ -276,7 +284,7 @@ def process_pdf_after_mineru(parse_path, pdf_name, language, output_dir, AIclien
         logger.error(f"Error in processing {pdf_name}: {str(e)}")
 
 def main():
-    collection_name = "MMLongDoc_text"
+    collection_name = "tatdqa_text"
     language = "english"
     
     # Initialize Milvus
@@ -326,9 +334,9 @@ def main():
     
     # Modify the logic of different datasets
     # 指定PDF文件所在的目录
-    pdf_dir = "/root/autodl-tmp/cpdfr-data/cpdfr/hybridSearch/experiment_multiHop/MMLongBench-Doc/documents"
+    pdf_dir = "/home/gpu/dzy/M3-CaseRAG/experiment_singleHop/vidore/tatdqa"
 
-    executor = ThreadPoolExecutor(max_workers = 20)
+    # executor = ThreadPoolExecutor(max_workers = 20)
     # 遍历目录下的所有文件
     for filename in tqdm(os.listdir(pdf_dir), desc="Processing PDFs",total=len(os.listdir(pdf_dir))):
         # 只处理PDF文件
@@ -353,20 +361,20 @@ def main():
             # except Exception as e:
             #     print(f"Error processing {filename}: {str(e)}")
             parse_path = output_dir + "/parse"
-            # if not os.path.exists(parse_path):
-            #     run_mineru(pdf_path,parse_path)
-            with open(str(parse_path)+f"/{pdf_name}/chunk.json", 'r', encoding='utf-8') as file:
-                chunks = json.load(file)
+            if not os.path.exists(parse_path):
+                run_mineru(pdf_path,parse_path)
             
-            # Formally importing milvus requires building through this path
-            # Remember the Minio bucket path prompted during execution
-            upload_minio(chunks, retriever, writer, mymodel)
-            
-            # process_pdf_after_mineru(parse_path, pdf_name, language, output_dir, AIclient, chunk_size=800)    
+            process_pdf_after_mineru(parse_path, pdf_name, language, output_dir, AIclient, chunk_size=800)    
             # executor.submit(
             #     process_pdf_after_mineru,
             #     parse_path, pdf_name, language, output_dir, AIclient, chunk_size=800
             # )     
+            with open(str(parse_path)+f"/{pdf_name}/chunk.json", 'r', encoding='utf-8') as file:
+                chunks = json.load(file)
+                
+            # Formally importing milvus requires building through this path
+            # Remember the Minio bucket path prompted during execution
+            upload_minio(chunks, retriever, writer, mymodel)
     # executor.shutdown(wait=True)   
     
     logger.info("Data processing and uploading to Minio completed, please remember the data path on Minio!")

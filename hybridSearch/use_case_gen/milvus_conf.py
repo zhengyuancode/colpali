@@ -4,7 +4,7 @@ import numpy as np
 import concurrent.futures
 import json
 import os
-from text_embeding import QwenEmbeder
+
 
 
 uri = "http://127.0.0.1:19530"
@@ -113,7 +113,7 @@ class MilvusColbertRetriever:
         schema.add_field(
             field_name="text_dense", 
             datatype=DataType.FLOAT_VECTOR, 
-            dim=1024,
+            dim=2048,
             description="chunk text dense"
         )
         schema.add_field(
@@ -183,7 +183,9 @@ class MilvusColbertRetriever:
             collection_name=self.collection_name, index_params=index_params, sync=True
         )
 
-    def multi_img_search(self, multi_query, file_names, topk):
+    
+    
+    def multi_img_search(self, multi_query, file_names, topk, coarse):
         # Perform a vector search on the collection to find the top-k most similar documents.
         # Data is a vector group used for batch retrieval
         count = self.count_page_by_file(file_names)
@@ -193,7 +195,7 @@ class MilvusColbertRetriever:
             results = self.client.search(
                 self.collection_name,
                 multi_query,
-                limit=topk*10,
+                limit=coarse,
                 anns_field="patch_dense",
                 filter=f'file_name in {file_names}',
                 output_fields=["patch_dense", "seq_id", "page_num","file_name"],
@@ -257,7 +259,69 @@ class MilvusColbertRetriever:
             return score_results[:topk]
         else:
             return score_results
-        
+    
+    def coarse_multi_token_search(self, multi_query, file_names, topk):
+        # Perform a vector search on the collection to find the top-k most similar documents.
+        # Data is a vector group used for batch retrieval   
+        try: 
+            results = self.client.search(
+                self.collection_name,
+                multi_query,
+                limit=topk,
+                anns_field="patch_dense",
+                filter=f'file_name in {file_names}',
+                output_fields=["page_num","file_name"],
+                search_params={"metric_type": "IP"}
+            )
+        except Exception as e:
+            print("Multi_img retrieval failed:\n")
+            print(str(e))
+                 
+        pages = []
+        seen = set()  # 用于跟踪已见的唯一标识
+        for r_id in range(len(results)):
+            for r in range(len(results[r_id])):
+                # 提取文档的唯一标识组合
+                page_num = results[r_id][r]["entity"]["page_num"]
+                file_name = results[r_id][r]["entity"]["file_name"]
+                unique_key = (page_num, file_name)  # 创建不可变的唯一键
+                
+                # 仅当未出现过时才添加到列表
+                if unique_key not in seen:
+                    seen.add(unique_key)
+                    pages.append({
+                        "page_num": page_num,
+                        "file_name": file_name
+                    })   
+        page_paths = []
+        def search_page_path(page, client, collection_name):
+            page_num = page["page_num"]
+            file_name = page["file_name"]
+            page_colbert_vecs = client.query(
+                collection_name=collection_name,
+                filter=f'page_num == {page_num} and file_name == "{file_name}"',
+                output_fields=["seq_id", "page_path"]
+            )
+            page_path=""
+            for item in page_colbert_vecs:
+                if item["seq_id"] == 0:
+                    page_path = item["page_path"]
+                    break 
+            return page_path
+
+        with concurrent.futures.ThreadPoolExecutor(os.cpu_count()) as executor:
+            workers = {
+                executor.submit(
+                    search_page_path, page, client, self.collection_name
+                ): page
+                for page in pages
+            }
+            for worker in concurrent.futures.as_completed(workers):
+                page_path = worker.result()
+                page_paths.append(page_path)
+                
+        return page_paths
+    
     def hybrid_text_search(self,query_param, topk):
         file_names = query_param["file_names"]
         
@@ -267,7 +331,7 @@ class MilvusColbertRetriever:
             "anns_field": "text_dense",
             "param": {"nprobe": 10},
             "expr": f"file_name in {file_names}",
-            "limit": topk*30
+            "limit": topk
         }
         request_1 = AnnSearchRequest(**search_param_1)
         
@@ -277,7 +341,7 @@ class MilvusColbertRetriever:
             "anns_field": "text_sparse",
             "param": {"drop_ratio_search": 0.2},
             "expr": f"file_name in {file_names}",
-            "limit": topk*30
+            "limit": topk
         }
         request_2 = AnnSearchRequest(**search_param_2)
         
@@ -287,7 +351,7 @@ class MilvusColbertRetriever:
                 collection_name=self.collection_name,
                 reqs=reqs,
                 ranker=ranker,
-                limit=topk*30,
+                limit=topk,
                 output_fields=["page_num","file_name","page_path"]
             )
         
@@ -299,6 +363,49 @@ class MilvusColbertRetriever:
                     page_paths.append(page_path)
         return page_paths
     
+    def hybrid_pure_text_search(self,query_param, topk):
+        file_names = query_param["file_names"]
+        
+        # text semantic search (dense)
+        search_param_1 = {
+            "data": [query_param["text_dense"]],
+            "anns_field": "text_dense",
+            "param": {"nprobe": 10},
+            "expr": f"file_name in {file_names}",
+            "limit": topk*10
+        }
+        request_1 = AnnSearchRequest(**search_param_1)
+        
+        # full-text search (sparse)
+        search_param_2 = {
+            "data": [query_param["text"]],
+            "anns_field": "text_sparse",
+            "param": {"drop_ratio_search": 0.2},
+            "expr": f"file_name in {file_names}",
+            "limit": topk*10
+        }
+        request_2 = AnnSearchRequest(**search_param_2)
+        
+        reqs = [request_1, request_2]
+        ranker = RRFRanker(80)
+        res = client.hybrid_search(
+                collection_name=self.collection_name,
+                reqs=reqs,
+                ranker=ranker,
+                limit=topk,
+                output_fields=["text", "page_path"]
+            )
+        
+        page_paths = []
+        ans_chunks = []
+        for hits in res:
+            for hit in hits:
+                page_path = hit["entity"]["page_path"]
+                ans_chunk = hit["entity"]["text"]
+                ans_chunks.append(ans_chunk)
+                page_paths.append(page_path)
+        return ans_chunks, page_paths
+    
     def multi_img_in_pages_search(self, page_paths, multi_query, topk):
         score_results = []
         def rerank_single_page(page_path, multi_query):
@@ -308,9 +415,10 @@ class MilvusColbertRetriever:
                 filter=f'page_path == "{page_path}"',
                 output_fields=["page_num", "file_name"]
             )
-            if(len(page_num_name) > 1):
-                print("ERROR:Vector database data error.")
-                return
+            if(len(page_num_name) != 1):
+                print(f"ERROR:When search {page_path}")
+                print(f"Vector database data return not the only one or no return:\n{page_num_name}")
+                return (0, "", "", page_path)
             page_num, file_name = page_num_name[0]["page_num"], page_num_name[0]["file_name"]
             
             page_colbert_vecs = self.client.query(

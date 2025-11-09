@@ -12,7 +12,6 @@ from pymilvus.bulk_writer import BulkFileType,RemoteBulkWriter
 import json
 import os
 from transformers import AutoModel
-from pdf_image import pdfToImage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -73,68 +72,57 @@ def upload_minio(page_paths, retriever, file_name, writer, mymodel):
     retriever.bulk_prepare_commit(writer) 
 
 def main():
-    # collection_name = "LongDocURL"
+    collection_name = "tatdqa"
     
     
-    # # Initialize Milvus
-    # if(milvus_client.has_collection(collection_name=collection_name)):
-    #     logger.info(f"{collection_name} vector database already exists.")
-    #     retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=milvus_client)
-    # else:
-    #     retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=milvus_client)
-    #     retriever.create_collection_multi_img()
-    #     retriever.create_index_multi_img()
-    #     logger.info(f"Created {collection_name} vector database.")
+    # Initialize Milvus
+    if(milvus_client.has_collection(collection_name=collection_name)):
+        logger.info(f"{collection_name} vector database already exists.")
+        retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=milvus_client)
+    else:
+        retriever = MilvusColbertRetriever(collection_name=collection_name, milvus_client=milvus_client)
+        retriever.create_collection_multi_img()
+        retriever.create_index_multi_img()
+        logger.info(f"Created {collection_name} vector database.")
     
-    # connections.connect(
-    #     uri="http://127.0.0.1:19530", 
-    #     token="root:Milvus"
-    # )
+    connections.connect(
+        uri="http://127.0.0.1:19530", 
+        token="root:Milvus"
+    )
 
-    # collection = Collection(
-    #     name=collection_name,
-    #     using="default"
-    # )
+    collection = Collection(
+        name=collection_name,
+        using="default"
+    )
 
-    # schema = collection.schema
+    schema = collection.schema
     
-    # #default minio account
-    # ACCESS_KEY="minioadmin"
-    # SECRET_KEY="minioadmin"
-    # BUCKET_NAME="a-bucket"
+    #default minio account
+    ACCESS_KEY="minioadmin"
+    SECRET_KEY="minioadmin"
+    BUCKET_NAME="a-bucket"
     
-    # conn = RemoteBulkWriter.S3ConnectParam(
-    #     endpoint="localhost:9000", # the default MinIO service started along with Milvus
-    #     access_key=ACCESS_KEY,
-    #     secret_key=SECRET_KEY,
-    #     bucket_name=BUCKET_NAME,
-    #     secure=False
-    # )
+    conn = RemoteBulkWriter.S3ConnectParam(
+        endpoint="localhost:9000", # the default MinIO service started along with Milvus
+        access_key=ACCESS_KEY,
+        secret_key=SECRET_KEY,
+        bucket_name=BUCKET_NAME,
+        secure=False
+    )
 
-    # writer = RemoteBulkWriter(
-    #     schema=schema,
-    #     remote_path="/"+collection_name,
-    #     connect_param=conn,
-    #     file_type=BulkFileType.PARQUET
-    # )
+    writer = RemoteBulkWriter(
+        schema=schema,
+        remote_path="/"+collection_name,
+        connect_param=conn,
+        file_type=BulkFileType.PARQUET
+    )
     
-    # mymodel = init_model()
+    mymodel = init_model()
     # Modify the logic of different datasets
-    pdf_dir = "/home/gpu/dzy/M3-CaseRAG/experiment_multiHop/LongDocURL_public/documents"
-    with open("/home/gpu/dzy/M3-CaseRAG/experiment_multiHop/LongDocURL_public/multihop_LongDocURL_public.json", 'r', encoding='utf-8') as file:
-        test_data = json.load(file)
-    pdf_names = []
-    for item in test_data:
-        pdf_name = item['doc_no']
-        if pdf_name not in pdf_names:
-            pdf_names.append(pdf_name)
-    total = 0    
-    for file_path in tqdm(os.listdir(pdf_dir), desc="Processing PDFs",total=len(os.listdir(pdf_dir))):
-        if file_path.lower().endswith('.pdf'):      
-            pdf_name = os.path.splitext(file_path)[0]
-            if pdf_name not in pdf_names:
-                print(f"Skipping {pdf_name} as it's not in the target.")
-                continue
+    pdf_dir = "/home/gpu/dzy/M3-CaseRAG/experiment_singleHop/vidore/tatdqa"
+    for filename in tqdm(os.listdir(pdf_dir), desc="Processing PDFs",total=len(os.listdir(pdf_dir))):
+        if filename.lower().endswith('.pdf'):      
+            pdf_name = os.path.splitext(filename)[0]
             output_dir = os.path.join(pdf_dir, pdf_name)
     
             page_paths = []
@@ -144,8 +132,6 @@ def main():
             if not dataset_path.exists():
                 os.makedirs(dataset_path)
                 logger.info(f"Create Path: {str(dataset_path)}")
-                pdfToImage(os.path.join(pdf_dir, file_path), output_dir)
-                
             for path in dataset_path.glob('*'):
                 if path.is_file() and path.suffix.lower() in image_extensions:
                     page_paths.append(str(path))     
@@ -158,18 +144,9 @@ def main():
             if page_paths == []:
                 logger.warning(f"No image files found for {pdf_name}, please check if the PDF has been converted to images.")
                 continue
-            for i in range(len(page_paths)):
-                if (i+1) % 100 == 0:
-                    total += 1
-                if total == 165 or total == 167:
-                    logger.info(f"Debug break at total={total}, pdf_name={pdf_name}")
-                    break
-            total += 1
-            if total == 165 or total == 167:
-                    logger.info(f"Debug break at total={total}, pdf_name={pdf_name}")
-                    break
-            # upload_minio(page_paths, retriever, pdf_name, writer, mymodel)
-    print(f"Total batch: {total}")
+            upload_minio(page_paths, retriever, pdf_name, writer, mymodel)
+    
+    
     
 
 if __name__ == "__main__":

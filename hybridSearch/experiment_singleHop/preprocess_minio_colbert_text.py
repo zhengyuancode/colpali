@@ -1,3 +1,5 @@
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 from datasets import load_dataset,load_from_disk
 from tqdm import tqdm
 from typing import cast,List
@@ -10,9 +12,8 @@ from milvus_conf import MilvusColbertRetriever, client as milvus_client
 from pymilvus import Collection,connections
 from pymilvus.bulk_writer import BulkFileType,RemoteBulkWriter
 import json
-import os
+
 from transformers import AutoModel
-from pdf_image import pdfToImage
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 # model_name = "/root/autodl-tmp/cpdfr-data/modelcache/huggingface/hub/models--vidore--colpali-v1.3/snapshots/1b5c8929330df1a66de441a9b5409a878f0de5b0"
 
 def init_model():
+    
     #local load
     model_path = "/home/gpu/.cache/huggingface/hub/models--jinaai--jina-embeddings-v4/snapshots/737fa5c46f0262ceba4a462ffa1c5bcf01da416f"
     
@@ -36,29 +38,43 @@ def init_model():
     model.to("cuda")
     return model
 
-def processImg(page_paths: List[str],Mymodel):
+def processText(page_text_paths: List[str],Mymodel,batch_size):
+    with open(page_text_paths, 'r', encoding='utf-8') as file:
+        texts = json.load(file)
     # Customize the collate function to load images as needed
-    multivector_image_embeddings = Mymodel.encode_image(
-        images=page_paths,
-        task="retrieval",
-        return_multivector=True,
-    )
-    return multivector_image_embeddings
+    chunk_texts = [texts[i:i + batch_size] for i in range(0, len(texts), batch_size)]
+    results = []
+    for ct in chunk_texts:
+        with torch.no_grad():
+            multivector_text_embeddings = Mymodel.encode_text(
+                texts=ct,
+                task="retrieval",
+                prompt_name="passage",
+                return_multivector=True,
+            )
+            
+        result = [
+            emb.float().cpu().numpy() if isinstance(emb, torch.Tensor) else emb
+            for emb in multivector_text_embeddings
+        ]
+        results.extend(result)
+        del multivector_text_embeddings
+        torch.cuda.empty_cache()  
+        
+    return results
 
-def upload_minio(page_paths, retriever, file_name, writer, mymodel):
+def upload_minio(output_dir, page_text_paths, retriever, file_name, writer, mymodel):
     
-    if not page_paths:
-        logger.error("No supported image files were found in the specified folder.")
+    if not page_text_paths:
+        logger.error("No supported text files were found in the specified folder.")
         return
-    
-    logger.info("Obtain image vector groups and single vectors ..")
-    colbert_vecs_list = processImg(page_paths, mymodel)
-    
-    logger.info("Start writing to the vector database ..") 
-    for i, (page_path, colbert_vecs) in enumerate(tqdm(zip(page_paths, colbert_vecs_list),desc="Making BulkData", total=len(page_paths))):
+    colbert_vecs_list = processText(page_text_paths, mymodel, 1)
+    for i in tqdm(range(len(colbert_vecs_list)), desc="Making BulkData", total=len(colbert_vecs_list)):
+        colbert_vecs = colbert_vecs_list[i]
+        page_path = output_dir + f"/{i+1}.png"
         page_num = int(Path(page_path).stem)
         data = {
-            "colbert_vecs": colbert_vecs.float().cpu().numpy(),
+            "colbert_vecs": colbert_vecs,
             "page_num": page_num,
             "page_path": str(page_path),
             "file_name": file_name,
@@ -73,8 +89,7 @@ def upload_minio(page_paths, retriever, file_name, writer, mymodel):
     retriever.bulk_prepare_commit(writer) 
 
 def main():
-    collection_name = "OR2UC"
-    
+    collection_name = "MMLongDoc_colbert_text"
     
     # Initialize Milvus
     if(milvus_client.has_collection(collection_name=collection_name)):
@@ -118,36 +133,26 @@ def main():
         file_type=BulkFileType.PARQUET
     )
     
-    embeder = init_model()
+    mymodel = init_model()
     # Modify the logic of different datasets
-    pdf_dir = "/home/gpu/dzy/M3-CaseRAG/use_case_gen/OR2UC/prd"  
-    for file_path in tqdm(os.listdir(pdf_dir), desc="Processing PDFs",total=len(os.listdir(pdf_dir))):
-        if file_path.lower().endswith('.pdf'):      
-            pdf_name = os.path.splitext(file_path)[0]
+    pdf_dir = "/home/gpu/dzy/M3-CaseRAG/experiment_multiHop/MMLongBench-Doc/documents"
+    for filename in tqdm(os.listdir(pdf_dir), desc="Processing PDFs",total=len(os.listdir(pdf_dir))):
+        if filename.lower().endswith('.pdf'):      
+            pdf_name = os.path.splitext(filename)[0]
             output_dir = os.path.join(pdf_dir, pdf_name)
     
-            page_paths = []
-            dataset_path = Path(output_dir)
-            
-            image_extensions = {'.jpg', '.jpeg', '.png'}
-            if not dataset_path.exists():
-                os.makedirs(dataset_path)
-                logger.info(f"Create Path: {str(dataset_path)}")
-                pdfToImage(os.path.join(pdf_dir, file_path), output_dir)
-                
-            for path in dataset_path.glob('*'):
-                if path.is_file() and path.suffix.lower() in image_extensions:
-                    page_paths.append(str(path))     
-            
+            page_text_paths = output_dir + f"/parse/{pdf_name}/caption_text_list.json"
+            if not Path(page_text_paths).exists:
+                logger.error(f"{page_text_paths} not exists")
+                return
             
             # Formally importing milvus requires building through this path
             # Remember the Minio bucket path prompted during execution
             # eg. 
             # Upload file '/root/autodl-tmp/cpdfr-data/cpdfr/hybridSearch/experiment_cpdfpqa/bulk_writer/5be22173-7649-4f78-9cd8-c36be645d74f/1.parquet' to 'cpdf_pqa/5be22173-7649-4f78-9cd8-c36be645d74f/1.parquet' (remote_bulk_writer.py:256)
-            if page_paths == []:
-                logger.warning(f"No image files found for {pdf_name}, please check if the PDF has been converted to images.")
-                continue
-            upload_minio(page_paths, retriever, pdf_name, writer, embeder)
+            upload_minio(output_dir, page_text_paths, retriever, pdf_name, writer, mymodel)
+    
+    
     
 
 if __name__ == "__main__":

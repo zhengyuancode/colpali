@@ -4,7 +4,7 @@ import numpy as np
 import concurrent.futures
 import json
 import os
-
+from text_embeding import QwenEmbeder
 
 
 uri = "http://127.0.0.1:19530"

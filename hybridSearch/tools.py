@@ -1,17 +1,32 @@
 from pymilvus import MilvusClient, DataType
 import json
 import os
+from milvus_conf import MilvusColbertRetriever, client as milvus_client
 
 client = MilvusClient(
     uri="http://localhost:19530",
     token="root:Milvus"
 )
 
-def delete_collection(collection_name):
-    return client.drop_collection(collection_name=collection_name)
+# def delete_collection(collection_name):
+#     return client.drop_collection(collection_name=collection_name)
+# test = client.query(
+#                 collection_name="admin",
+#                 filter=f'page_num == 1',
+#                 output_fields=["page_path"]
+#             )
 
-print(client.list_collections())
-# print(delete_collection("test"))
+hybrid_text_collection_name = "admin_text"
+multi_img_collection_name = "admin"
+
+hybrid_text_retriever = MilvusColbertRetriever(collection_name=hybrid_text_collection_name, milvus_client=milvus_client)
+multi_img_retriever = MilvusColbertRetriever(collection_name=multi_img_collection_name, milvus_client=milvus_client)
+# hybrid_text_retriever.delete_entity_by_file("0a219429-0a41-46cc-8f3c-bed89b2497c2")
+print(multi_img_retriever.count_entity_all())
+print(hybrid_text_retriever.count_entity_all())
+# print(client.list_collections())
+
+# print(delete_collection("admin_text"))
 
 # from transformers import pipeline
 

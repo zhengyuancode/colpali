@@ -5,6 +5,7 @@ import torch
 from milvus_conf import MilvusColbertRetriever, client as milvus_client
 from tqdm import tqdm
 import logging
+from text_embeding import QwenEmbeder
 from prompt import add_reflect_prompt, all_reflect_prompt, summary_prompt, DEFAULT_JUDGE_TEMPLATE, orType_check_prompt,DEFAULT_JUDGE_TEMPLATE_UNA
 from transformers import AutoModel
 from openai import OpenAI
@@ -99,12 +100,12 @@ def multi_img_in_text_search(queries: List[str], file_names: List[str], topk: in
 
         page_paths = hybrid_text_retriever.hybrid_text_search(text_query_param, coarse)
         
-        new_page_paths = []
-        for path in page_paths:
-            new_page_paths.append(transform_path(path))
+        # new_page_paths = []
+        # for path in page_paths:
+        #     new_page_paths.append(transform_path(path))
             
-        score_results = multi_img_retriever.multi_img_in_pages_search(new_page_paths, query_np, topk)
-        # score_results = multi_img_retriever.multi_img_in_pages_search(page_paths, query_np, topk)
+        # score_results = multi_img_retriever.multi_img_in_pages_search(new_page_paths, query_np, topk)
+        score_results = multi_img_retriever.multi_img_in_pages_search(page_paths, query_np, topk)
         
         search_results = []
         
@@ -356,7 +357,7 @@ def orType_check(
         
     prompt =  orType_check_prompt + f"[user query]: {user_query}\n[last conclusion]: {last_conclusion}"
     
-    response  = QWENclient.chat.completions.create(
+    response  = AIclient.chat.completions.create(
                 model=MODELNAME, 
                 messages=[
                 {
@@ -370,7 +371,7 @@ def orType_check(
     return search_results_or, orType_check_ans
 
 def force_final_answer(user_query):
-    response  = QWENclient.chat.completions.create(
+    response  = AIclient.chat.completions.create(
                 model=MODELNAME, 
                 messages=[
                 {
@@ -387,8 +388,7 @@ async def multi_img_in_text_search_answer(
     topk: int,
     multi_img_retriever,
     hybrid_text_retriever,
-    embeder,
-    coarse = 15
+    embeder
 ): 
     count_page = multi_img_retriever.count_page_by_file([query["doc_id"]])
     conclusion = []
@@ -433,20 +433,7 @@ async def multi_img_in_text_search_answer(
                         else:
                             node_query_or = ""
                         break
-            if node_query == "":
-                for i in range(len(query_graph)):
-                    q = query_graph[i]
-                    if q["query"] not in history_queries:
-                        node_query = q["query"]
-                        if i == len(query_graph)-1:
-                            node_type = ""
-                        else:
-                            node_type = q["type"]
-                        if q["or"].strip() != "":
-                            node_query_or = q["or"]
-                        else:
-                            node_query_or = ""
-                        break
+                    
             if node_query == "":
                 # 执行节点全遍历后的总体反思
                 node_query = history_queries[-1]
@@ -454,7 +441,7 @@ async def multi_img_in_text_search_answer(
             node_query = query["question"]
                 
         search_results_list = await asyncio.to_thread(
-            multi_img_in_text_search, [node_query], [query["doc_id"]], topk, multi_img_retriever, hybrid_text_retriever, embeder, coarse
+            multi_img_in_text_search, [node_query], [query["doc_id"]], topk, multi_img_retriever, hybrid_text_retriever, embeder
         )
         search_results = search_results_list[0]
         history_queries.append(node_query)
@@ -659,24 +646,50 @@ def group_by_doc_id(input_list):
         
 # Retrieve query statements from the dataset, Customizable logic to adapt to different datasets
 def get_queries():
-    with open("/home/gpu/dzy/M3-CaseRAG/experiment_multiHop/MMLongBench-Doc/multihop_MMLongBench-Doc.json", 'r', encoding='utf-8') as file:
+    with open("/home/gpu/dzy/M3-CaseRAG/experiment_singleHop/vidore/docvqa/docvqa.json", 'r', encoding='utf-8') as file:
         data = json.load(file)
     return data
 
 def main():    
-    experiment_name = "multihop_MMLongBench-Doc_results"
-    multi_img_collection_name = "MMLongDoc"
-    multi_token_collection_name = "MMLongDoc_colbert_text"
-    hybrid_text_collection_name = "MMLongDoc_text"
+    experiment_name = "patch_to_patch_docvqa_5"
+    multi_img_collection_name = "docvqa"
+    multi_token_collection_name = "docvqa_colbert_text"
+    hybrid_text_collection_name = "docvqa_text"
     queries = get_queries()
     print(f"need process {len(queries)} queries")
     
     embeder = init_model()
+    # embeder = ""
     multi_img_retriever = MilvusColbertRetriever(collection_name=multi_img_collection_name, milvus_client=milvus_client)
     
     multi_token_retriever = MilvusColbertRetriever(collection_name=multi_token_collection_name, milvus_client=milvus_client)
     
     hybrid_text_retriever = MilvusColbertRetriever(collection_name=hybrid_text_collection_name, milvus_client=milvus_client)
+    # hybrid_text_retriever = ""
+    
+    # Create semaphore and limit maximum concurrency
+    # semaphore = asyncio.Semaphore(1)
+    
+    # pbar = tqdm(total=len(queries), desc="Searching Queries")
+    # async def run_with_semaphore(query):
+    #     async with semaphore:
+    #         result = single_img_in_text_search_answer(
+    #             query,
+    #             5,
+    #             multi_img_retriever,
+    #             hybrid_text_retriever,
+    #             multi_token_retriever,
+    #             embeder,
+    #             coarse=30,
+    #             filenames=["tatdqa"]
+    #         )
+    #         pbar.update(1)
+    #         return result   
+    # start_time = time.time()
+    # tasks = [run_with_semaphore(query) for query in queries]  
+    # results = await asyncio.gather(*tasks)
+    # end_time = time.time()
+    # pbar.close()
     
     results = []
     start_time = time.time()
@@ -686,8 +699,10 @@ def main():
                 5,
                 multi_img_retriever,
                 hybrid_text_retriever,
+                multi_token_retriever,
                 embeder,
-                coarse=30
+                coarse=5,
+                filenames=["docvqa"]
             )
         results.append(result)
     end_time = time.time()
@@ -699,24 +714,38 @@ def main():
     #     results.extend(ans_list)
     
     total = 0
-    answer_acc = 0
+    # answer_acc = 0
+    page_acc_topk1 = 0
+    page_acc_topk3 = 0
+    page_acc_topk5 = 0
     for result in results:
-        if "answer_score" in result:
-            if result["answer_score"] == "4" or result["answer_score"] == "5":
-                answer_acc += 1
-            elif result["answer_score"] == "1" or result["answer_score"] == "2" or result["answer_score"] == "3":
-                continue
-            else:
-                logger.error("LLM's grading format for answers is incorrect")
-                continue
+        # if "answer_score" in result:
+        if "page_judge_topk1" in result:
+            total += 1
+            if result["page_judge_topk1"] == 1:
+                page_acc_topk1 += 1
+            if result["page_judge_topk3"] == 1:
+                page_acc_topk3 += 1
+            if result["page_judge_topk5"] == 1:
+                page_acc_topk5 += 1
+            # if result["answer_score"] == "4" or result["answer_score"] == "5":
+            #     answer_acc += 1
+            # elif result["answer_score"] == "1" or result["answer_score"] == "2" or result["answer_score"] == "3":
+            #     continue
+            # else:
+            #     logger.error("LLM's grading format for answers is incorrect")
+            #     continue
                 
-    result_file = f"./vidore/tatdqa/coarse30/{experiment_name}_results.json"   
+    result_file = f"./vidore/docvqa/coarse5/{experiment_name}_results.json"   
     result_data = {
         # "model":MODELNAME,
         "singleHop":results,
         "eval_results":{
             "total":total,
-            "answer_acc":answer_acc,
+            # "answer_acc":answer_acc,
+            "page_acc_topk1":page_acc_topk1,
+            "page_acc_topk3":page_acc_topk3,
+            "page_acc_topk5":page_acc_topk5,
             "time":end_time-start_time
         }
         } 

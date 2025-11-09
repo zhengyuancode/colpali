@@ -5,11 +5,13 @@ import torch
 from milvus_conf import MilvusColbertRetriever, client as milvus_client
 from tqdm import tqdm
 import logging
-from text_embeding import QwenEmbeder
-from prompt import Actor_search_prompt
-from transformers import AutoModel, AutoTokenizer
+from prompt import Actor_validation_prompt
+from transformers import AutoModel
 from openai import OpenAI
 import os
+from stable_baselines3 import PPO
+import pickle
+from feature import build_state_for_query
 import base64
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,33 +24,31 @@ AIclient = OpenAI(
 )
 
 def init_model():
-    model = AutoModel.from_pretrained(
-        "jinaai/jina-embeddings-v4", 
+    #local load
+    embeder_path = "/home/gpu/.cache/huggingface/hub/models--jinaai--jina-embeddings-v4/snapshots/737fa5c46f0262ceba4a462ffa1c5bcf01da416f"
+    topNmodel_path = "/home/gpu/dzy/M3-CaseRAG/MDP/models/best_model.zip"
+    scaler = pickle.load(open("/home/gpu/dzy/M3-CaseRAG/MDP/scaler.pkl", "rb"))
+    topNmodel = PPO.load(topNmodel_path)
+    embeder = AutoModel.from_pretrained(
+        embeder_path,
         trust_remote_code=True, 
-        torch_dtype=torch.float16)
-    model.to("cuda")
-    return model
+        torch_dtype=torch.float16,
+        local_files_only=True
+        )
+    embeder.to("cuda")
+    return embeder, topNmodel, scaler
 
-def process_querys(queries: List[str], mymodel) -> List[torch.Tensor]:
-    """Process queries and generate embedding vectors"""
-    multivector_embeddings = mymodel.encode_text(
-        texts=queries,
-        task="retrieval",
-        prompt_name="query",
-        return_multivector=True,
-    )
-    return multivector_embeddings
 
-def multi_img_search(queries: List[str], file_names: List[str], topk: int, mymodel, multi_img_retriever):
-    query_embeddings = process_querys(queries, mymodel)
-    
+def multi_img_search(queries: List[str], file_names: List[str], topk: int, embeder,  topNmodel, scaler, multi_img_retriever):
     search_results_list = []
     
     for i in range(len(queries)):
-        # query_np is a two-dimensional array of queries for each sentence in the query group
-        query_np = query_embeddings[i].float().cpu().numpy()
+        query  = queries[i]
         
-        score_results = multi_img_retriever.multi_img_search(query_np, file_names, topk)
+        state, query_np = build_state_for_query(query, embeder, scaler=scaler)
+        action, _ = topNmodel.predict(state, deterministic=True)
+        topN = int(action) + 1
+        score_results = multi_img_retriever.multi_img_search(query_np, file_names, topk, topN)
         
         search_results = []
         
@@ -108,80 +108,85 @@ def qwen_vl_max(image_paths, userInput, assistant = ""):
     return completion.choices[0].message.content
 
 # By default, only one query is entered here
-async def multi_img_search_multiHop_actors(
-    sys_name,
-    user_query,
+async def verify_actor(
+    system_description,
+    actor,
     topk: int,
     file_names,
-    mymodel,
+    embeder,
+    topNmodel,
+    scaler,
     multi_img_retriever,
     page_count_max = 100,
 ): 
     history_pages = []
     multiHop_count = 0
-    query = user_query
-    actors = []
+    actor_valid = "yes"
+    query = actor+"在系统中的业务场景是什么？"
+    conclusions = []
     history_queries = []
     assistant = ""
-    while(True):
-        print(actors)
+    while(len(history_pages) < page_count_max):
         if assistant == "":
-            search_results_list = await asyncio.to_thread(
-                multi_img_search, [query], file_names, topk, mymodel, multi_img_retriever
-            )
+            search_results_list =  multi_img_search([query], file_names, topk, embeder, topNmodel, scaler, multi_img_retriever)
+            
             search_results = search_results_list[0]
             
-            if len(history_pages) >= page_count_max:
-                logger.info("The maximum number of search pages has been reached, stop generating")
-                break
-                    
             history_pages.extend(search_results)
             history_queries.append(query)
-            userInput = f"当前系统为：{sys_name}\n" + Actor_search_prompt + "\n [history actors]:" + json.dumps(actors) + "\n [history queries]:" + json.dumps(history_queries)   
-        
+            userInput = Actor_validation_prompt+ f"{system_description}\n [Actor]:" + actor + "\n [Conclusions]:" + json.dumps(conclusions) + "\n [history queries]:" + json.dumps(history_queries)   
                                 
         answer = qwen_vl_max(search_results, userInput, assistant)
         try:
-            res = json.loads(answer) 
+            res = json.loads(answer)
+            print(res)
             assistant = ""
             multiHop_count += 1
-            actors = res["actors"]
-            if res["query"].strip() == "": 
+            if res["valid"].strip() != "":
+                actor_valid = res["valid"]
+                break
+            if res["query"].strip() != "": 
                 break
             else:
                 query = res["query"]
+            if res["conclusion"].strip() != "":
+                conclusions.append(res["conclusion"])
         except Exception as e:
             logger.error(f"VLM answer format error: {str(e)}")
             assistant = answer
             continue
 
    
-    return actors       
+    return {"actor": actor, "valid": actor_valid}       
              
 
 async def main():    
-    multi_img_collection_name = "NonMD_Req"
-    file_names = ["Smart City Big Data Center"]
-    page_count_max = 100
-    sys_name = "智慧城市大数据中心"
-    queries = ["系统功能，项目介绍，业务流程是什么？",]
+    multi_img_collection_name = "OR2UC"
+    multi_img_retriever = MilvusColbertRetriever(collection_name=multi_img_collection_name, milvus_client=milvus_client)
+    file_names = ["ant rent"]
+    page_count_max = multi_img_retriever.count_page_by_file(file_names)
+    system_description = "蚂蚁短租租房系统"
+    actors = ['用户', '房源提供者', '支付服务', '系统管理员']
+    topk = 2
     
-    model = init_model()
+    embeder, topNmodel, scaler = init_model()
     multi_img_retriever = MilvusColbertRetriever(collection_name=multi_img_collection_name, milvus_client=milvus_client)
     
     # Create semaphore and limit maximum concurrency
     semaphore = asyncio.Semaphore(1)
     
-    pbar = tqdm(total=len(queries), desc="Searching Actors")
+    pbar = tqdm(total=len(actors), desc="Searching UseCases")
     
-    async def run_with_semaphore(query):
+    async def run_with_semaphore(actor):
         async with semaphore:
-            result = await multi_img_search_multiHop_actors(
-                sys_name,
-                query,
-                5,
+            result = await verify_actor(
+                system_description,
+                actor,
+                topk,
                 file_names,
-                model,
+                embeder,
+                topNmodel,
+                scaler,
                 multi_img_retriever,
                 page_count_max
             )
@@ -189,11 +194,10 @@ async def main():
             return result
             
     
-    tasks = [run_with_semaphore(query) for query in queries]  
-    results = await asyncio.gather(*tasks)
-    
+    tasks = [run_with_semaphore(actor) for actor in actors]  
+    verify = await asyncio.gather(*tasks)
     pbar.close()
-    print(results)
+    print(verify)
 
 if __name__ == "__main__":
     asyncio.run(main())
